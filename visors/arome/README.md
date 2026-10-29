@@ -23,6 +23,12 @@ python3 -m http.server 8000
 # http://localhost:8000/visors/arome/   (amb les dades copiades a visors/arome/)
 ```
 
+## Publicació
+
+Les dades es generen a l'ordinador de l'Enric i es pugen al servidor d'Arsys on hi ha meteo4u.com.
+Al servidor han d'anar a la mateixa carpeta que el visor: `/visors/arome/` (al costat d'aquest `index.html`).
+No es desen al repositori (el `.gitignore` les exclou).
+
 ## Paràmetres d'URL
 
 - `capa=temp|vent|precip|neu|acum|nuvols`: capa inicial.
