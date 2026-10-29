@@ -62,6 +62,7 @@ a.card:hover { box-shadow: 0 6px 18px rgba(16, 32, 48, 0.22); transform: transla
 /* Franges de color inspirades en les paletes de cada visor */
 .sw-arome { background: linear-gradient(90deg, #5e3c99 0%, #3b7cc4 18%, #5fbfd9 32%, #a6dba0 46%, #f7e47a 60%, #f4a259 74%, #d7301f 88%, #7f0000 100%); }
 .sw-sst   { background: linear-gradient(90deg, #08306b 0%, #2171b5 25%, #6baed6 45%, #fdd49e 65%, #f16913 82%, #a50f15 100%); }
+.sw-radar { background: linear-gradient(90deg, #e8f4fb 0%, #9ad0ec 18%, #3d9be0 34%, #2fb24a 50%, #f5e44a 64%, #f39a2b 78%, #e0301e 90%, #b0177f 100%); }
 .sw-icon  { background: linear-gradient(90deg, #f7fbff 0%, #c6dbef 25%, #6baed6 50%, #2171b5 75%, #08306b 100%); }
 .sw-mar   { background: linear-gradient(90deg, #e0f3f8 0%, #91bfdb 30%, #4575b4 60%, #313695 100%); }
 .swatch::after {
