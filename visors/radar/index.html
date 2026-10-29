@@ -1,0 +1,849 @@
+<!doctype html>
+<html lang="ca">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Radar Europa · meteo4u</title>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/mp4-muxer@5.1.3/build/mp4-muxer.js"></script>
+<style>
+  :root{
+    --panel: rgba(17,21,28,.86);
+    --panel-solid:#11151c;
+    --line: rgba(255,255,255,.10);
+    --txt:#e8ecf2;
+    --muted:#98a2b3;
+    --accent:#5fb0f0;
+    --warn:#fbb31a;
+    --radius:12px;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;height:100%;background:#0b0e13;color:var(--txt);
+    font:14px/1.35 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+  #map{position:absolute;inset:0;background:#0b0e13}
+  .panel{position:absolute;z-index:1000;background:var(--panel);backdrop-filter:blur(8px);
+    -webkit-backdrop-filter:blur(8px);border:1px solid var(--line);border-radius:var(--radius);
+    box-shadow:0 6px 24px rgba(0,0,0,.35)}
+
+  /* capçalera */
+  #head{top:12px;left:12px;padding:12px 14px;max-width:min(440px,calc(100% - 24px))}
+  #head h1{margin:0 0 8px;font-size:15px;font-weight:650;letter-spacing:.01em}
+  #head h1 span{color:var(--muted);font-weight:400}
+  .seg{display:flex;gap:2px;background:rgba(255,255,255,.06);border-radius:9px;padding:2px}
+  .seg button{flex:1;border:0;background:transparent;color:var(--muted);font:inherit;font-size:13px;
+    padding:6px 8px;border-radius:7px;cursor:pointer;white-space:nowrap}
+  .seg button.on{background:var(--accent);color:#06121f;font-weight:600}
+  .seg button:not(.on):hover{color:var(--txt)}
+  #when{margin-top:10px;display:flex;align-items:baseline;gap:10px;flex-wrap:wrap}
+  #tLocal{font-size:22px;font-weight:650;font-variant-numeric:tabular-nums}
+  #tUtc{color:var(--muted);font-variant-numeric:tabular-nums}
+  #age{font-size:12px;padding:1px 7px;border-radius:99px;background:rgba(255,255,255,.08);color:var(--muted)}
+  #age.old{background:rgba(251,179,26,.18);color:var(--warn)}
+
+  /* opcions */
+  #opts{top:12px;right:12px;padding:10px 12px;width:270px;font-size:13px}
+  #opts label{white-space:nowrap}
+  #opts label{display:flex;align-items:center;justify-content:space-between;gap:8px;margin:4px 0;color:var(--muted)}
+  #opts select,#opts input[type=range]{width:110px}
+  #opts select{background:#1b212b;color:var(--txt);border:1px solid var(--line);border-radius:6px;padding:3px}
+  #opts .chk{justify-content:flex-start}
+  #thrRow{display:none!important}
+  #thrRow.on{display:flex!important}
+  #opts .thr{display:flex;align-items:center;gap:6px}
+  #opts .thr input[type=range]{width:74px}
+  #thrVal{font-variant-numeric:tabular-nums;color:var(--txt);min-width:54px;text-align:right}
+  #legBar div.off{opacity:.18}
+  /* exportar */
+  #exp{right:12px;bottom:96px;width:min(320px,calc(100% - 24px));padding:12px;display:none;font-size:13px}
+  #exp.open{display:block}
+  body.exporting #legend{display:none}
+  .expHead{display:flex;justify-content:space-between;align-items:center;margin-bottom:6px}
+  .expHead .x{border:0;background:none;color:var(--muted);font-size:20px;cursor:pointer;line-height:1}
+  .expHint{color:var(--muted);font-size:12px;margin-bottom:8px}
+  .expBtns{display:flex;gap:8px;margin-top:10px}
+  .expBtns .act{flex:1;border:0;border-radius:9px;padding:9px 6px;font:inherit;font-weight:600;cursor:pointer;
+    background:rgba(255,255,255,.1);color:var(--txt)}
+  .expBtns .act.primary{background:var(--accent);color:#06121f}
+  .expBtns .act:disabled{opacity:.45;cursor:default}
+  #expMsg{margin-top:8px;font-size:12px;color:var(--muted);min-height:1em}
+  #expMsg .bar{height:4px;background:rgba(255,255,255,.1);border-radius:2px;margin-top:5px;overflow:hidden}
+  #expMsg .bar div{height:100%;background:var(--accent);width:0}
+  #cropGuide{position:absolute;z-index:900;pointer-events:none;display:none;border:2px dashed rgba(255,255,255,.95);
+    box-shadow:0 0 0 9999px rgba(0,0,0,.38);border-radius:2px}
+  #optsToggle{display:none;background:var(--panel);width:44px;height:44px}
+
+  /* llegenda */
+  #legend{right:12px;bottom:96px;padding:8px 10px 6px;width:min(360px,calc(100% - 24px))}
+  #legTitle{font-size:12px;color:var(--muted);margin-bottom:5px}
+  #legBar{display:flex;height:12px;border-radius:3px;overflow:hidden}
+  #legBar div{flex:1}
+  #legLab{display:flex;font-size:10.5px;color:var(--muted);margin-top:3px;font-variant-numeric:tabular-nums}
+  #legLab div{flex:1;text-align:left;white-space:nowrap;overflow:visible}
+
+  /* línia de temps */
+  #bar{left:12px;right:12px;bottom:max(12px,env(safe-area-inset-bottom));padding:10px 12px;
+    display:flex;align-items:center;gap:10px}
+  .btn{border:0;background:rgba(255,255,255,.08);color:var(--txt);width:34px;height:34px;border-radius:9px;
+    cursor:pointer;display:grid;place-items:center;flex:none}
+  .btn:hover{background:rgba(255,255,255,.16)}
+  .btn.primary{background:var(--accent);color:#06121f}
+  .btn svg{width:16px;height:16px}
+  #tl{flex:1;position:relative;height:34px;display:flex;flex-direction:column;justify-content:center;min-width:0}
+  #slider{width:100%;margin:0;accent-color:var(--accent)}
+  #tlLab{display:flex;justify-content:space-between;font-size:11px;color:var(--muted);font-variant-numeric:tabular-nums}
+  #speed{background:#1b212b;color:var(--txt);border:1px solid var(--line);border-radius:7px;padding:5px;font:inherit;font-size:12px}
+  #loading{position:absolute;inset:0;display:grid;place-items:center;z-index:999;pointer-events:none;
+    color:var(--muted);font-size:13px}
+
+  .leaflet-popup-content-wrapper,.leaflet-popup-tip{background:var(--panel-solid);color:var(--txt)}
+  .leaflet-popup-content{margin:10px 12px;font-size:13px}
+  .pv b{font-size:16px}
+  .pv .sw{display:inline-block;width:11px;height:11px;border-radius:2px;margin-right:6px;vertical-align:-1px}
+  .pv small{color:var(--muted)}
+  .leaflet-control-attribution{background:rgba(17,21,28,.7)!important;color:var(--muted)!important}
+  .leaflet-control-attribution a{color:#b9c3d1!important}
+  .leaflet-control-zoom{margin-top:180px!important}
+
+  @media (max-width:700px){
+    #head{max-width:calc(100% - 76px)}
+    #head .seg button{font-size:12px;padding:6px 4px}
+    #opts{display:none;top:60px}
+    #opts.open{display:block}
+    #optsToggle{display:grid;position:absolute;top:12px;right:12px;z-index:1001}
+    #legend{bottom:92px;left:12px;right:12px;width:auto}
+    #tLocal{font-size:19px}
+    #speed{display:none}
+    .leaflet-control-zoom{display:none}
+  }
+</style>
+</head>
+<body>
+<div id="map"></div>
+<div id="loading">Carregant radar…</div>
+
+<div id="head" class="panel">
+  <h1>Radar de precipitació <span>· Europa</span></h1>
+  <div class="seg" id="prods"></div>
+  <div id="when"><span id="tLocal">—</span><span id="tUtc"></span><span id="age"></span></div>
+</div>
+
+<button id="optsToggle" class="btn panel" title="Opcions" aria-label="Opcions">
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 6h16M4 12h16M4 18h16"/></svg>
+</button>
+<div id="opts" class="panel">
+  <label>Mapa base
+    <select id="base">
+      <option value="dark">Fosc</option>
+      <option value="light">Clar</option>
+      <option value="topo" selected>Relleu</option>
+      <option value="sat">Satèl·lit</option>
+    </select>
+  </label>
+  <label>Opacitat <input id="opacity" type="range" min="0.2" max="1" step="0.05" value="0.85"></label>
+  <label id="thrRow" title="Amaga els ecos per sota d'aquest valor">Mostrar des de
+    <span class="thr"><input id="thr" type="range" min="0" max="45" step="1" value="12"><span id="thrVal">12 dBZ</span></span></label>
+  <label class="chk"><input id="cov" type="checkbox" checked> Zones sense radar</label>
+  <label class="chk"><input id="labels" type="checkbox" checked> Noms i fronteres</label>
+</div>
+
+<div id="legend" class="panel">
+  <div id="legTitle"></div>
+  <div id="legBar"></div>
+  <div id="legLab"></div>
+</div>
+
+<div id="bar" class="panel">
+  <button class="btn" id="prev" title="Anterior (←)" aria-label="Anterior">
+    <svg viewBox="0 0 24 24" fill="currentColor"><path d="M15 6l-8 6 8 6z"/></svg></button>
+  <button class="btn primary" id="play" title="Reproduir (espai)" aria-label="Reproduir">
+    <svg id="icoPlay" viewBox="0 0 24 24" fill="currentColor"><path d="M7 5l12 7-12 7z"/></svg>
+    <svg id="icoPause" viewBox="0 0 24 24" fill="currentColor" style="display:none"><path d="M6 5h4v14H6zM14 5h4v14h-4z"/></svg></button>
+  <button class="btn" id="next" title="Següent (→)" aria-label="Següent">
+    <svg viewBox="0 0 24 24" fill="currentColor"><path d="M9 6l8 6-8 6z"/></svg></button>
+  <div id="tl">
+    <input id="slider" type="range" min="0" max="0" value="0" step="1" aria-label="Temps">
+    <div id="tlLab"><span id="tlFirst"></span><span id="tlCount"></span><span id="tlLast"></span></div>
+  </div>
+  <select id="speed" title="Velocitat">
+    <option value="500">Lent</option>
+    <option value="250" selected>Normal</option>
+    <option value="120">Ràpid</option>
+  </select>
+  <button class="btn" id="last" title="Últim (End)" aria-label="Últim">
+    <svg viewBox="0 0 24 24" fill="currentColor"><path d="M6 6l8 6-8 6zM16 6h2v12h-2z"/></svg></button>
+  <button class="btn" id="expBtn" title="Descarregar imatge o vídeo" aria-label="Descarregar">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 4v11M7 10l5 5 5-5M5 20h14"/></svg></button>
+</div>
+
+<div id="cropGuide"></div>
+<div id="exp" class="panel">
+  <div class="expHead"><b>Descarregar</b><button id="expClose" class="x" aria-label="Tancar">×</button></div>
+  <div class="expHint">Mou el mapa i fes zoom per triar la zona. Es baixa el que queda dins del marc.</div>
+  <div class="seg" id="expFmt">
+    <button data-r="0" class="on">Pantalla</button><button data-r="1.7778">16:9</button><button data-r="1">1:1</button><button data-r="0.5625">9:16</button>
+  </div>
+  <div class="expBtns">
+    <button id="expPng" class="act">Imatge PNG</button>
+    <button id="expVid" class="act primary">Vídeo MP4</button>
+  </div>
+  <div id="expMsg"></div>
+</div>
+
+<script>
+(function(){
+"use strict";
+var INDEX_URL = "radar_index.js";   // generat per opera_radar.py
+var REFRESH_MS = 2 * 60 * 1000;
+var TZ = "Europe/Madrid";
+
+var idx = null, prod = null, frames = [], cur = 0, timer = null, playing = false;
+var imgCache = {};
+var $ = function(id){ return document.getElementById(id); };
+
+/* ---------- mapa ---------- */
+var map = L.map("map", {zoomSnap: 0.5, worldCopyJump: true, minZoom: 3, maxZoom: 11,
+  attributionControl: true}).setView([46.5, 8], 4.5);
+map.createPane("labels"); map.getPane("labels").style.zIndex = 650;
+map.getPane("labels").style.pointerEvents = "none";
+
+/* Fons sense clau d'API (CARTO ara en demana) */
+var ESRI = "https://server.arcgisonline.com/ArcGIS/rest/services/";
+function esri(path, opt){   // crossOrigin: cal per poder exportar el mapa a PNG/vídeo
+  return L.tileLayer(ESRI + path + "/MapServer/tile/{z}/{y}/{x}", L.extend({crossOrigin: true}, opt));
+}
+var bases = {
+  dark:  esri("Canvas/World_Dark_Gray_Base",  {maxNativeZoom:16, attribution:"© Esri, HERE, Garmin, © OpenStreetMap"}),
+  light: esri("Canvas/World_Light_Gray_Base", {maxNativeZoom:16, attribution:"© Esri, HERE, Garmin, © OpenStreetMap"}),
+  topo:  esri("World_Shaded_Relief",          {maxNativeZoom:13, attribution:"© Esri"}),
+  sat:   esri("World_Imagery",                {maxNativeZoom:18, attribution:"© Esri, Maxar, Earthstar Geographics"})
+};
+var labelLayers = {
+  dark:  esri("Canvas/World_Dark_Gray_Reference",  {maxNativeZoom:16, pane:"labels"}),
+  light: esri("Canvas/World_Light_Gray_Reference", {maxNativeZoom:16, pane:"labels"})
+};
+var baseKey = "topo", base = bases.topo.addTo(map), labels = labelLayers.light.addTo(map);
+
+function setBase(k){
+  map.removeLayer(base); base = bases[k].addTo(map); baseKey = k; setLabels();
+}
+function setLabels(){
+  if (labels) map.removeLayer(labels);
+  labels = null;
+  if ($("labels").checked){
+    labels = (baseKey === "dark" || baseKey === "sat" ? labelLayers.dark : labelLayers.light).addTo(map);
+  }
+}
+
+/* capes radar: doble buffer per evitar parpelleig */
+var bufA = null, bufB = null, covLayer = null, cvLayer = null, opacity = 0.85;
+
+/* capa canvas per als productes codificats com a valor (DBZH): el color i el
+   llindar s'apliquen aqui, al navegador */
+var CanvasOverlay = L.ImageOverlay.extend({
+  _initImage: function(){
+    var c = this._image = L.DomUtil.create("canvas",
+      "leaflet-image-layer" + (this._zoomAnimated ? " leaflet-zoom-animated" : ""));
+    c.width = 1; c.height = 1;
+    c.onselectstart = L.Util.falseFn; c.onmousemove = L.Util.falseFn;
+    if (this.options.zIndex) this._updateZIndex();
+  },
+  setUrl: function(){ return this; }
+});
+
+function makeOverlays(bounds){
+  [bufA, bufB, covLayer, cvLayer].forEach(function(l){ if (l) map.removeLayer(l); });
+  cvLayer = new CanvasOverlay(BLANK, bounds, {opacity: 0, interactive:false, zIndex: 5}).addTo(map);
+  var px = BLANK;
+  bufA = L.imageOverlay(px, bounds, {opacity: opacity, interactive:false, zIndex: 3}).addTo(map);
+  bufB = L.imageOverlay(px, bounds, {opacity: 0, interactive:false, zIndex: 4}).addTo(map);
+  if (idx.coverage){
+    preload(covUrl());
+    covLayer = L.imageOverlay(covUrl(), bounds,
+      {opacity: 1, interactive:false, zIndex: 2});
+    if ($("cov").checked) covLayer.addTo(map);
+  }
+}
+var BLANK = "data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7";
+function covUrl(){ return idx.coverage + "?v=" + encodeURIComponent(idx.generated); }
+
+/* ---------- dades ---------- */
+function frameUrl(p, stamp){ return "frames/" + p + "_" + stamp + ".png"; }
+
+function preload(url){
+  if (imgCache[url]) return imgCache[url].p;
+  var im = new Image();
+  var p = new Promise(function(res){ im.onload = function(){ res(true); }; im.onerror = function(){ res(false); }; });
+  im.src = url;
+  imgCache[url] = {img: im, p: p};
+  return p;
+}
+
+function loadIndex(cb){
+  var s = document.createElement("script");
+  s.src = INDEX_URL + "?t=" + Date.now();
+  s.onload = function(){ s.remove(); cb(window.RADAR_INDEX || null); };
+  s.onerror = function(){ s.remove(); cb(null); };
+  document.head.appendChild(s);
+}
+
+/* ---------- temps ---------- */
+function stampDate(s){
+  return new Date(Date.UTC(+s.slice(0,4), +s.slice(4,6)-1, +s.slice(6,8), +s.slice(8,10), +s.slice(10,12)));
+}
+var fmtLocal = new Intl.DateTimeFormat("ca", {timeZone: TZ, weekday:"short", day:"numeric", month:"short",
+  hour:"2-digit", minute:"2-digit", hour12:false});
+var fmtHM = new Intl.DateTimeFormat("ca", {timeZone: TZ, hour:"2-digit", minute:"2-digit", hour12:false});
+function utcHM(d){ return ("0"+d.getUTCHours()).slice(-2) + ":" + ("0"+d.getUTCMinutes()).slice(-2); }
+
+function updateTimeLabels(){
+  if (!frames.length) return;
+  var d = stampDate(frames[cur]);
+  if (prod === "ACRR"){
+    var d0 = new Date(d.getTime() - 3600e3);
+    $("tLocal").textContent = fmtHM.format(d0) + "–" + fmtHM.format(d);
+    $("tUtc").textContent = utcHM(d0) + "–" + utcHM(d) + " UTC";
+  } else {
+    $("tLocal").textContent = fmtLocal.format(d);
+    $("tUtc").textContent = utcHM(d) + " UTC";
+  }
+  var mins = Math.round((Date.now() - d.getTime()) / 60000);
+  var age = $("age");
+  age.textContent = mins < 1 ? "ara" : mins < 90 ? "fa " + mins + " min" : "fa " + Math.round(mins/60) + " h";
+  age.className = (cur === frames.length - 1 && mins > 30) ? "old" : "";
+  $("tlFirst").textContent = fmtHM.format(stampDate(frames[0]));
+  $("tlLast").textContent = fmtHM.format(stampDate(frames[frames.length-1]));
+  $("tlCount").textContent = (cur + 1) + " / " + frames.length;
+}
+
+/* ---------- llegenda ---------- */
+function fmtNum(v){ return (v < 1 && v > 0) ? String(v).replace(/^0/, "") : String(v); }
+function drawLegend(){
+  var P = idx.products[prod];
+  $("legTitle").textContent = P.label + " (" + P.units + ")";
+  var bar = $("legBar"), lab = $("legLab");
+  bar.innerHTML = ""; lab.innerHTML = "";
+  var thr = isEncoded() ? threshold : -Infinity;
+  P.colors.forEach(function(c, i){
+    var d = document.createElement("div"); d.style.background = c;
+    var hi = P.bounds[i+1];
+    if (hi !== undefined && hi <= thr) d.className = "off";
+    bar.appendChild(d);
+    var t = document.createElement("div");
+    t.textContent = (i === 0 && P.bounds[0] < 0) ? "" : fmtNum(P.bounds[i]);   // la 1a classe (<0 dBZ) sense etiqueta
+    lab.appendChild(t);
+  });
+}
+
+/* ---------- productes codificats (llindar) ---------- */
+var threshold = 12, lut = null, lutKey = "";
+try { var t0 = localStorage.getItem("radar_thr"); if (t0 !== null && !isNaN(+t0)) threshold = Math.max(0, +t0); } catch(e){}
+function isEncoded(){ return !!(idx && idx.products[prod] && idx.products[prod].encoding); }
+function decodeVal(code, P){ return P.encoding.vmin + (code - 1) * P.encoding.step; }
+function buildLut(P){
+  var key = prod + "|" + threshold;
+  if (lut && lutKey === key) return lut;
+  lut = new Uint32Array(256); lutKey = key;
+  var rgb = P.colors.map(hexRgb), nb = P.bounds.length;
+  for (var c = 1; c < 256; c++){
+    var v = decodeVal(c, P);
+    if (v < threshold || v < P.bounds[0]) continue;
+    var k = 0; while (k + 1 < nb && v >= P.bounds[k+1]) k++;
+    var a = k === 0 ? 150 : 235;
+    lut[c] = ((a << 24) | (rgb[k][2] << 16) | (rgb[k][1] << 8) | rgb[k][0]) >>> 0;  // RGBA little-endian
+  }
+  return lut;
+}
+var workCv = document.createElement("canvas"), workCtx = null, outImg = null;
+var lastEncodedImg = null;
+function renderEncoded(img){
+  var P = idx.products[prod], w = img.naturalWidth, h = img.naturalHeight;
+  var cv = cvLayer.getElement();
+  if (workCv.width !== w || workCv.height !== h){
+    workCv.width = w; workCv.height = h; workCtx = null; outImg = null;
+  }
+  if (!workCtx) workCtx = workCv.getContext("2d", {willReadFrequently: true});
+  if (cv.width !== w || cv.height !== h){ cv.width = w; cv.height = h; outImg = null; }
+  var octx = cv.getContext("2d");
+  if (!outImg) outImg = octx.createImageData(w, h);
+  workCtx.clearRect(0, 0, w, h);
+  workCtx.drawImage(img, 0, 0);
+  var src = workCtx.getImageData(0, 0, w, h).data;   // canal R = codi
+  var o32 = new Uint32Array(outImg.data.buffer), L8 = buildLut(P);
+  for (var i = 0, j = 0, n = w * h; i < n; i++, j += 4){
+    o32[i] = src[j + 3] ? L8[src[j]] : 0;
+  }
+  octx.putImageData(outImg, 0, 0);
+  lastEncodedImg = img;
+}
+function setThreshold(v){
+  threshold = v;
+  $("thrVal").textContent = v + " dBZ";
+  try { localStorage.setItem("radar_thr", String(v)); } catch(e){}
+  drawLegend();
+  if (isEncoded() && lastEncodedImg) renderEncoded(lastEncodedImg);
+}
+
+/* ---------- mostrar frame ---------- */
+var showToken = 0;
+function show(i){
+  if (!frames.length) return;
+  cur = Math.max(0, Math.min(frames.length - 1, i));
+  $("slider").value = cur;
+  updateTimeLabels();
+  var url = frameUrl(prod, frames[cur]);
+  var tok = ++showToken;
+  preload(url).then(function(){
+    if (tok !== showToken) return;
+    if (isEncoded()){
+      renderEncoded(imgCache[url].img);
+      cvLayer.setOpacity(opacity); bufA.setOpacity(0); bufB.setOpacity(0);
+      return;
+    }
+    cvLayer.setOpacity(0);
+    var back = (bufA.options.opacity > 0) ? bufB : bufA;
+    var front = (back === bufA) ? bufB : bufA;
+    back.setUrl(url);
+    var done = function(){ back.setOpacity(opacity); front.setOpacity(0); };
+    var el = back.getElement();
+    if (el && el.complete && el.src.indexOf(url) >= 0) done(); else back.once("load", done);
+  });
+}
+
+function setProduct(p){
+  if (!idx || !idx.products[p]) return;
+  prod = p;
+  frames = idx.frames[p] || [];
+  document.querySelectorAll("#prods button").forEach(function(b){ b.classList.toggle("on", b.dataset.p === p); });
+  $("slider").max = Math.max(0, frames.length - 1);
+  $("thrRow").classList.toggle("on", isEncoded());
+  lastEncodedImg = null;
+  drawLegend();
+  frames.forEach(function(s){ preload(frameUrl(p, s)); });
+  try { history.replaceState(null, "", "#" + p); } catch(e){}
+  show(frames.length - 1);
+}
+
+/* ---------- animació ---------- */
+function step(){
+  if (!playing) return;
+  var nxt = cur + 1 >= frames.length ? 0 : cur + 1;
+  var url = frameUrl(prod, frames[nxt]);
+  preload(url).then(function(){
+    if (!playing) return;
+    show(nxt);
+    var wait = +$("speed").value * (nxt === frames.length - 1 ? 5 : 1);
+    timer = setTimeout(step, wait);
+  });
+}
+function play(on){
+  playing = on;
+  $("icoPlay").style.display = on ? "none" : "";
+  $("icoPause").style.display = on ? "" : "none";
+  clearTimeout(timer);
+  if (on) timer = setTimeout(step, 50);
+}
+
+/* ---------- valor al clic ---------- */
+function hexRgb(h){ h = h.replace("#",""); return [parseInt(h.substr(0,2),16), parseInt(h.substr(2,2),16), parseInt(h.substr(4,2),16)]; }
+var pixCanvas = document.createElement("canvas");
+function samplePixel(url, latlng){
+  var c = imgCache[url]; if (!c || !c.img.complete || !c.img.naturalWidth) return null;
+  var im = c.img, b = L.latLngBounds(idx.bounds);
+  var nw = map.options.crs.project(b.getNorthWest()), se = map.options.crs.project(b.getSouthEast());
+  var p = map.options.crs.project(latlng);
+  var fx = (p.x - nw.x) / (se.x - nw.x), fy = (p.y - nw.y) / (se.y - nw.y);
+  if (fx < 0 || fx >= 1 || fy < 0 || fy >= 1) return {outside: true};
+  var x = Math.floor(fx * im.naturalWidth), y = Math.floor(fy * im.naturalHeight);
+  pixCanvas.width = 1; pixCanvas.height = 1;
+  var ctx = pixCanvas.getContext("2d");
+  ctx.clearRect(0,0,1,1);
+  ctx.drawImage(im, x, y, 1, 1, 0, 0, 1, 1);
+  return {rgba: ctx.getImageData(0,0,1,1).data};
+}
+function classFor(rgba){
+  var P = idx.products[prod], best = -1, bd = 1e9;
+  P.colors.forEach(function(c, i){
+    var r = hexRgb(c), d = Math.abs(r[0]-rgba[0]) + Math.abs(r[1]-rgba[1]) + Math.abs(r[2]-rgba[2]);
+    if (d < bd){ bd = d; best = i; }
+  });
+  return best;
+}
+map.on("click", function(e){
+  if (!frames.length) return;
+  var html;
+  try {
+    var s = samplePixel(frameUrl(prod, frames[cur]), e.latlng);
+    var P = idx.products[prod];
+    if (!s || s.outside){ html = "Fora del domini del radar"; }
+    else if (P.encoding && s.rgba[3] > 0){
+      var v = decodeVal(s.rgba[0], P), kk = 0;
+      while (kk + 1 < P.bounds.length && v >= P.bounds[kk+1]) kk++;
+      html = '<span class="sw" style="background:' + P.colors[kk] + '"></span><b>' +
+        v.toFixed(1).replace(".", ",") + "</b> " + P.units +
+        (v < threshold ? "<br><small>per sota del llindar (" + threshold + " dBZ)</small>" : "");
+    }
+    else if (!P.encoding && s.rgba[3] > 0){
+      var k = classFor(s.rgba), lo = P.bounds[k], hi = P.bounds[k+1];
+      html = '<span class="sw" style="background:' + P.colors[k] + '"></span><b>' +
+        (hi !== undefined ? fmtNum(lo) + "–" + fmtNum(hi) : "≥ " + fmtNum(lo)) + "</b> " + P.units;
+    } else {
+      var cv = idx.coverage ? samplePixel(covUrl(), e.latlng) : null;
+      html = (cv && cv.rgba && cv.rgba[3] > 0) ? "Sense cobertura radar" : "Sense precipitació detectada";
+    }
+  } catch(err){
+    html = "<small>Per llegir valors cal obrir el visor des del servidor web (no com a fitxer local).</small>";
+  }
+  html = '<div class="pv">' + html + "<br><small>" + e.latlng.lat.toFixed(2) + "°, " + e.latlng.lng.toFixed(2) + "°</small></div>";
+  L.popup({maxWidth: 240}).setLatLng(e.latlng).setContent(html).openOn(map);
+});
+
+/* ---------- exportar PNG / vídeo ---------- */
+var expRatio = 0, exporting = false;
+function cropRect(){
+  var s = map.getSize(), W = s.x, H = s.y;
+  if (!expRatio) return {x: 0, y: 0, w: W, h: H};
+  var w = W * 0.92, h = w / expRatio;
+  if (h > H * 0.80){ h = H * 0.80; w = h * expRatio; }
+  return {x: (W - w) / 2, y: (H - h) / 2, w: w, h: h};
+}
+function updateGuide(){
+  var g = $("cropGuide");
+  if (!$("exp").classList.contains("open")){ g.style.display = "none"; return; }
+  var r = cropRect();
+  g.style.display = "block";
+  g.style.left = r.x + "px"; g.style.top = r.y + "px";
+  g.style.width = r.w + "px"; g.style.height = r.h + "px";
+}
+map.on("resize", updateGuide);
+
+function outSize(r, maxW, maxH, even){
+  var sc = Math.min(window.devicePixelRatio || 1, 2);
+  var w = r.w * sc, h = r.h * sc, k = Math.min(1, maxW / w, maxH / h);
+  w = Math.round(w * k); h = Math.round(h * k);
+  if (even){ w -= w % 2; h -= h % 2; }
+  return {w: w, h: h, sc: w / r.w};
+}
+
+/* dibuixa en ctx els elements (tiles, overlays) tal com es veuen a la pantalla */
+function drawEls(ctx, els, r, sc){
+  var m = map.getContainer().getBoundingClientRect();
+  els.forEach(function(el){
+    if (el.tagName === "IMG" && !(el.complete && el.naturalWidth)) return;
+    var b = el.getBoundingClientRect();
+    if (!b.width || !b.height) return;
+    var op = parseFloat(getComputedStyle(el).opacity);
+    if (!(op > 0)) return;
+    ctx.globalAlpha = op;
+    ctx.drawImage(el, (b.left - m.left - r.x) * sc, (b.top - m.top - r.y) * sc, b.width * sc, b.height * sc);
+  });
+  ctx.globalAlpha = 1;
+}
+function layerCanvas(selector, r, o, bg){
+  var cv = document.createElement("canvas"); cv.width = o.w; cv.height = o.h;
+  var ctx = cv.getContext("2d");
+  if (bg){ ctx.fillStyle = bg; ctx.fillRect(0, 0, o.w, o.h); }
+  drawEls(ctx, Array.prototype.slice.call(map.getContainer().querySelectorAll(selector)), r, o.sc);
+  try { ctx.getImageData(0, 0, 1, 1); return cv; }          // el servidor de mapes permet CORS?
+  catch(e){ return null; }
+}
+
+/* capa radar d'un frame en un canvas a resolució nativa */
+function radarCanvas(img){
+  var cv = document.createElement("canvas");
+  if (!isEncoded()){ cv.width = img.naturalWidth; cv.height = img.naturalHeight; cv.getContext("2d").drawImage(img, 0, 0); return cv; }
+  var P = idx.products[prod], w = img.naturalWidth, h = img.naturalHeight;
+  if (workCv.width !== w || workCv.height !== h){ workCv.width = w; workCv.height = h; workCtx = null; outImg = null; }
+  if (!workCtx) workCtx = workCv.getContext("2d", {willReadFrequently: true});
+  workCtx.clearRect(0, 0, w, h); workCtx.drawImage(img, 0, 0);
+  var src = workCtx.getImageData(0, 0, w, h).data;
+  cv.width = w; cv.height = h;
+  var c2 = cv.getContext("2d"), out = c2.createImageData(w, h);
+  var o32 = new Uint32Array(out.data.buffer), L8 = buildLut(P);
+  for (var i = 0, j = 0, n = w * h; i < n; i++, j += 4) o32[i] = src[j + 3] ? L8[src[j]] : 0;
+  c2.putImageData(out, 0, 0);
+  return cv;
+}
+
+function timeStrings(stamp){
+  var d = stampDate(stamp);
+  if (prod === "ACRR"){
+    var d0 = new Date(d.getTime() - 3600e3);
+    return [fmtLocal.format(d0).replace(/\s\d\d:\d\d$/, "") + " " + fmtHM.format(d0) + "–" + fmtHM.format(d),
+            utcHM(d0) + "–" + utcHM(d) + " UTC"];
+  }
+  return [fmtLocal.format(d), utcHM(d) + " UTC"];
+}
+function roundRect(ctx, x, y, w, h, rad){
+  ctx.beginPath(); ctx.moveTo(x + rad, y); ctx.arcTo(x + w, y, x + w, y + h, rad); ctx.arcTo(x + w, y + h, x, y + h, rad);
+  ctx.arcTo(x, y + h, x, y, rad); ctx.arcTo(x, y, x + w, y, rad); ctx.closePath();
+}
+function decorate(ctx, o, stamp, noBase){
+  var P = idx.products[prod], fs = Math.max(12, Math.round(Math.min(o.w, o.h * 1.6) * 0.022));
+  var font = 'system-ui,-apple-system,"Segoe UI",Roboto,sans-serif', pad = Math.round(fs * 0.8);
+  var t = timeStrings(stamp);
+  var title = "Radar · " + P.label + (P.encoding ? " (≥ " + threshold + " " + P.units + ")" : "");
+  // caixa superior
+  ctx.font = "600 " + fs + "px " + font; var w1 = ctx.measureText(title).width;
+  ctx.font = "700 " + Math.round(fs * 1.35) + "px " + font; var w2 = ctx.measureText(t[0]).width;
+  ctx.font = fs + "px " + font; var w3 = ctx.measureText(t[1]).width;
+  var bw = Math.max(w1, w2 + w3 + fs * 0.7) + pad * 2, bh = fs * 3.4 + pad;
+  ctx.fillStyle = "rgba(17,21,28,.82)"; roundRect(ctx, pad, pad, bw, bh, fs * 0.5); ctx.fill();
+  ctx.textBaseline = "alphabetic"; ctx.fillStyle = "#e8ecf2";
+  ctx.font = "600 " + fs + "px " + font; ctx.fillText(title, pad * 2, pad + fs * 1.45);
+  ctx.font = "700 " + Math.round(fs * 1.35) + "px " + font; ctx.fillText(t[0], pad * 2, pad + fs * 3.2);
+  ctx.fillStyle = "#98a2b3"; ctx.font = fs + "px " + font; ctx.fillText(t[1], pad * 2 + w2 + fs * 0.7, pad + fs * 3.2);
+  // llegenda
+  var n = P.colors.length, lw = Math.min(o.w - pad * 2, Math.max(fs * 22, o.w * 0.42)), cw = lw / n;
+  var lx = o.w - pad - lw, lh = Math.round(fs * 0.75), lbh = lh + fs * 2.9, ly = o.h - pad - lbh;
+  ctx.fillStyle = "rgba(17,21,28,.82)"; roundRect(ctx, lx - pad * 0.6, ly, lw + pad * 1.2, lbh, fs * 0.5); ctx.fill();
+  ctx.fillStyle = "#98a2b3"; ctx.font = Math.round(fs * 0.8) + "px " + font;
+  ctx.fillText(P.label + " (" + P.units + ")", lx, ly + fs * 1.1);
+  var thr = P.encoding ? threshold : -Infinity;
+  for (var i = 0; i < n; i++){
+    var hi = P.bounds[i + 1];
+    ctx.globalAlpha = (hi !== undefined && hi <= thr) ? 0.2 : 1;
+    ctx.fillStyle = P.colors[i]; ctx.fillRect(lx + i * cw, ly + fs * 1.45, Math.ceil(cw), lh);
+  }
+  ctx.globalAlpha = 1; ctx.fillStyle = "#98a2b3"; ctx.font = Math.round(fs * 0.68) + "px " + font;
+  for (i = 0; i < n; i++) ctx.fillText(fmtNum(P.bounds[i]), lx + i * cw, ly + fs * 1.45 + lh + fs * 0.9);
+  // crèdits
+  var cred = "meteo4u.com · Radar: EUMETNET OPERA (CC BY 4.0)" + (noBase ? "" : " · Mapa: Esri");
+  ctx.font = Math.round(fs * 0.7) + "px " + font;
+  var cwid = ctx.measureText(cred).width;
+  ctx.fillStyle = "rgba(17,21,28,.7)"; ctx.fillRect(pad, o.h - pad - fs * 1.2, cwid + fs * 0.8, fs * 1.2);
+  ctx.fillStyle = "#cfd6e0"; ctx.fillText(cred, pad + fs * 0.4, o.h - pad - fs * 0.35);
+}
+
+/* prepara les capes fixes (fons, cobertura, noms) i retorna una funció que dibuixa el frame i */
+function prepareComposer(o, r){
+  var base = layerCanvas(".leaflet-tile-pane img.leaflet-tile", r, o, "#d9dde3");
+  var noBase = !base;
+  if (noBase){ base = document.createElement("canvas"); base.width = o.w; base.height = o.h;
+               var bc = base.getContext("2d"); bc.fillStyle = "#d9dde3"; bc.fillRect(0, 0, o.w, o.h); }
+  var labelsCv = layerCanvas(".leaflet-labels-pane img.leaflet-tile", r, o, null);
+  var cov = (covLayer && map.hasLayer(covLayer)) ? covLayer.getElement() : null;
+  var ref = bufA.getElement(), m = map.getContainer().getBoundingClientRect(), b = ref.getBoundingClientRect();
+  var rx = (b.left - m.left - r.x) * o.sc, ry = (b.top - m.top - r.y) * o.sc, rw = b.width * o.sc, rh = b.height * o.sc;
+  var cv = document.createElement("canvas"); cv.width = o.w; cv.height = o.h;
+  var ctx = cv.getContext("2d");
+  ctx.imageSmoothingEnabled = true;
+  return {canvas: cv, noBase: noBase, draw: function(radarCv, stamp){
+    ctx.globalAlpha = 1; ctx.drawImage(base, 0, 0);
+    if (cov && cov.complete && cov.naturalWidth){ ctx.globalAlpha = 1; ctx.drawImage(cov, rx, ry, rw, rh); }
+    ctx.globalAlpha = opacity; ctx.drawImage(radarCv, rx, ry, rw, rh); ctx.globalAlpha = 1;
+    if (labelsCv) ctx.drawImage(labelsCv, 0, 0);
+    decorate(ctx, o, stamp, noBase);
+  }};
+}
+
+function download(blob, name){
+  var a = document.createElement("a"), u = URL.createObjectURL(blob);
+  a.href = u; a.download = name; document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(function(){ URL.revokeObjectURL(u); }, 5000);
+}
+function expMsg(html){ $("expMsg").innerHTML = html; }
+function expProgress(txt, f){ expMsg(txt + '<div class="bar"><div style="width:' + Math.round(f * 100) + '%"></div></div>'); }
+function lockUI(on){
+  exporting = on; $("expPng").disabled = on; $("expVid").disabled = on;
+  ["dragging", "scrollWheelZoom", "doubleClickZoom", "touchZoom", "boxZoom", "keyboard"].forEach(function(h){
+    if (map[h]) on ? map[h].disable() : map[h].enable(); });
+}
+function fileBase(){ return "radar_" + prod + "_" + frames[cur]; }
+
+function exportPng(){
+  if (exporting || !frames.length) return;
+  play(false); lockUI(true); expMsg("Preparant imatge…");
+  var r = cropRect(), o = outSize(r, 4096, 4096, false), stamp = frames[cur];
+  preload(frameUrl(prod, stamp)).then(function(){
+    var comp = prepareComposer(o, r);
+    comp.draw(radarCanvas(imgCache[frameUrl(prod, stamp)].img), stamp);
+    comp.canvas.toBlob(function(b){
+      lockUI(false);
+      if (!b){ expMsg("No s'ha pogut generar la imatge."); return; }
+      download(b, fileBase() + ".png");
+      expMsg("✓ Imatge baixada (" + o.w + "×" + o.h + ")" + (comp.noBase ? " · sense mapa de fons (el servidor de mapes no ho permet)" : ""));
+    }, "image/png");
+  }).catch(function(e){ lockUI(false); expMsg("Error: " + e.message); });
+}
+
+function pickCodec(w, h, fps){
+  if (!window.VideoEncoder || !window.Mp4Muxer) return Promise.resolve(null);
+  // H.264 primer (es veu a tot arreu: WhatsApp, PowerPoint, mòbils); VP9 només si no n'hi ha
+  var list = [["avc1.640033","avc"], ["avc1.640028","avc"], ["avc1.4d0028","avc"], ["avc1.42E028","avc"],
+              ["avc1.42001f","avc"], ["vp09.00.40.08","vp9"]];
+  return list.reduce(function(p, c){
+    return p.then(function(found){
+      if (found) return found;
+      return VideoEncoder.isConfigSupported({codec: c[0], width: w, height: h, bitrate: 6e6, framerate: fps})
+        .then(function(s){ return s.supported ? {codec: c[0], mux: c[1]} : null; }, function(){ return null; });
+    });
+  }, Promise.resolve(null));
+}
+
+function exportVideo(){
+  if (exporting || frames.length < 2) return;
+  play(false); lockUI(true); expMsg("Preparant vídeo…");
+  var r = cropRect(), o = outSize(r, 1920, 1080, true), fps = 10;
+  var hold = +$("speed").value, list = frames.slice(), keep = cur;
+  var urls = list.map(function(s){ return frameUrl(prod, s); });
+  var comp_noBase = false;
+  Promise.all(urls.map(preload)).then(function(){
+    var comp = prepareComposer(o, r);
+    comp_noBase = comp.noBase;
+    return pickCodec(o.w, o.h, fps).then(function(codec){
+      return codec ? encodeMp4(comp, list, urls, o, fps, hold, codec) : recordFallback(comp, list, urls, o, hold);
+    });
+  }).then(function(res){
+    lockUI(false); show(keep);
+    download(res.blob, fileBase() + "." + res.ext);
+    expMsg("✓ Vídeo baixat (" + o.w + "×" + o.h + ", " + list.length + " frames" + (res.ext !== "mp4" ? ", format " + res.ext.toUpperCase() + ": aquest navegador no fa MP4" : "") + ")"
+      + (comp_noBase ? " · sense mapa de fons" : ""));
+  }).catch(function(e){ lockUI(false); show(keep); expMsg("Error en fer el vídeo: " + (e && e.message || e)); });
+}
+
+function encodeMp4(comp, list, urls, o, fps, hold, codec){
+  return new Promise(function(resolve, reject){
+    var muxer = new Mp4Muxer.Muxer({target: new Mp4Muxer.ArrayBufferTarget(),
+      video: {codec: codec.mux, width: o.w, height: o.h}, fastStart: "in-memory"});
+    var failed = null;
+    var enc = new VideoEncoder({output: function(ch, meta){ muxer.addVideoChunk(ch, meta); },
+                                error: function(e){ failed = e; }});
+    enc.configure({codec: codec.codec, width: o.w, height: o.h, bitrate: 6e6, framerate: fps});
+    var n = 0, i = 0, dt = 1e6 / fps;
+    function next(){
+      if (failed) return reject(failed);
+      if (i >= list.length){
+        return enc.flush().then(function(){
+          muxer.finalize();
+          resolve({blob: new Blob([muxer.target.buffer], {type: "video/mp4"}), ext: "mp4"});
+        }, reject);
+      }
+      comp.draw(radarCanvas(imgCache[urls[i]].img), list[i]);
+      var reps = Math.max(1, Math.round(hold * (i === list.length - 1 ? 5 : 1) / (1000 / fps)));
+      for (var k = 0; k < reps; k++){
+        var vf = new VideoFrame(comp.canvas, {timestamp: Math.round(n * dt), duration: Math.round(dt)});
+        enc.encode(vf, {keyFrame: n % (fps * 2) === 0}); vf.close(); n++;
+      }
+      i++;
+      expProgress("Codificant vídeo… " + i + " / " + list.length, i / list.length);
+      var wait = function(){ enc.encodeQueueSize > 8 ? setTimeout(wait, 15) : setTimeout(next, 0); };
+      wait();
+    }
+    next();
+  });
+}
+
+/* navegadors sense WebCodecs: gravació en temps real del canvas */
+function recordFallback(comp, list, urls, o, hold){
+  return new Promise(function(resolve, reject){
+    if (!comp.canvas.captureStream || !window.MediaRecorder) return reject(new Error("aquest navegador no pot gravar vídeo"));
+    var types = ["video/mp4;codecs=avc1", "video/mp4", "video/webm;codecs=vp9", "video/webm"], type = "";
+    for (var t = 0; t < types.length; t++) if (MediaRecorder.isTypeSupported(types[t])){ type = types[t]; break; }
+    var stream = comp.canvas.captureStream(15), chunks = [];
+    var rec = new MediaRecorder(stream, type ? {mimeType: type, videoBitsPerSecond: 6e6} : {});
+    rec.ondataavailable = function(e){ if (e.data.size) chunks.push(e.data); };
+    rec.onstop = function(){
+      var mt = rec.mimeType || type || "video/webm";
+      resolve({blob: new Blob(chunks, {type: mt}), ext: mt.indexOf("mp4") >= 0 ? "mp4" : "webm"});
+    };
+    var i = 0;
+    comp.draw(radarCanvas(imgCache[urls[0]].img), list[0]);
+    rec.start();
+    (function step(){
+      if (i >= list.length){ setTimeout(function(){ rec.stop(); }, 200); return; }
+      comp.draw(radarCanvas(imgCache[urls[i]].img), list[i]);
+      expProgress("Gravant vídeo… " + (i + 1) + " / " + list.length, (i + 1) / list.length);
+      var d = hold * (i === list.length - 1 ? 5 : 1); i++;
+      setTimeout(step, d);
+    })();
+  });
+}
+
+/* ---------- inici i refresc ---------- */
+function applyIndex(ix, first){
+  if (!ix){ if (first) $("loading").textContent = "No s'ha trobat " + INDEX_URL + ". Executa opera_radar.py."; return; }
+  var wasLast = frames.length && cur === frames.length - 1;
+  var oldGen = idx && idx.generated;
+  idx = ix;
+  if (first){
+    var pr = $("prods");
+    Object.keys(idx.products).forEach(function(p){
+      var b = document.createElement("button");
+      b.textContent = {RATE:"Intensitat", DBZH:"Reflectivitat", ACRR:"Acumulada 1 h"}[p] || p;
+      b.dataset.p = p; b.title = idx.products[p].label;
+      b.onclick = function(){ setProduct(p); };
+      pr.appendChild(b);
+    });
+    map.attributionControl.addAttribution(idx.attribution);
+    if (idx.products.DBZH && idx.products.DBZH.threshold !== undefined){
+      var stored = null; try { stored = localStorage.getItem("radar_thr"); } catch(e){}
+      if (stored === null) threshold = idx.products.DBZH.threshold;
+    }
+    $("thr").value = threshold; $("thrVal").textContent = threshold + " dBZ";
+    makeOverlays(idx.bounds);
+    var want = location.hash.slice(1);
+    setProduct(idx.products[want] ? want : (idx.products.DBZH ? "DBZH" : Object.keys(idx.products)[0]));
+    $("loading").style.display = "none";
+    return;
+  }
+  if (idx.generated === oldGen) return;
+  makeOverlays(idx.bounds);
+  lastEncodedImg = null;
+  var keep = frames[cur];
+  frames = idx.frames[prod] || [];
+  $("slider").max = Math.max(0, frames.length - 1);
+  frames.forEach(function(s){ preload(frameUrl(prod, s)); });
+  if (playing) return;
+  var j = frames.indexOf(keep);
+  show(wasLast || j < 0 ? frames.length - 1 : j);
+}
+
+loadIndex(function(ix){ applyIndex(ix, true); });
+setInterval(function(){ loadIndex(function(ix){ applyIndex(ix, false); }); }, REFRESH_MS);
+setInterval(updateTimeLabels, 30000);
+
+/* ---------- controls ---------- */
+$("slider").addEventListener("input", function(){ play(false); show(+this.value); });
+$("play").onclick = function(){ play(!playing); };
+$("prev").onclick = function(){ play(false); show(cur - 1); };
+$("next").onclick = function(){ play(false); show(cur + 1); };
+$("last").onclick = function(){ play(false); show(frames.length - 1); };
+$("base").onchange = function(){ setBase(this.value); };
+$("labels").onchange = setLabels;
+$("cov").onchange = function(){ if (!covLayer) return; this.checked ? covLayer.addTo(map) : map.removeLayer(covLayer); };
+$("opacity").oninput = function(){
+  opacity = +this.value;
+  [bufA, bufB, cvLayer].forEach(function(l){ if (l && l.options.opacity > 0) l.setOpacity(opacity); });
+};
+$("thr").oninput = function(){ setThreshold(+this.value); };
+function openExp(on){
+  $("exp").classList.toggle("open", on);
+  document.body.classList.toggle("exporting", on);
+  if (on) expMsg("");
+  updateGuide();
+}
+$("expBtn").onclick = function(){ openExp(!$("exp").classList.contains("open")); };
+$("expClose").onclick = function(){ if (!exporting) openExp(false); };
+document.querySelectorAll("#expFmt button").forEach(function(b){
+  b.onclick = function(){
+    document.querySelectorAll("#expFmt button").forEach(function(x){ x.classList.toggle("on", x === b); });
+    expRatio = +b.dataset.r; updateGuide();
+  };
+});
+$("expPng").onclick = exportPng;
+$("expVid").onclick = exportVideo;
+window.addEventListener("resize", updateGuide);
+$("optsToggle").onclick = function(){ $("opts").classList.toggle("open"); };
+document.addEventListener("keydown", function(e){
+  if (e.target.tagName === "SELECT" || e.target.tagName === "INPUT" && e.target.type !== "range") return;
+  if (e.key === " "){ e.preventDefault(); play(!playing); }
+  else if (e.key === "ArrowLeft"){ play(false); show(cur - 1); }
+  else if (e.key === "ArrowRight"){ play(false); show(cur + 1); }
+  else if (e.key === "End"){ play(false); show(frames.length - 1); }
+  else if (e.key === "Home"){ play(false); show(0); }
+});
+})();
+</script>
+</body>
+</html>
