@@ -1,0 +1,16 @@
+; Copia aquest fitxer a ~/.config/meteo4u/ftp.ini i fes: chmod 600 ~/.config/meteo4u/ftp.ini
+; (no el desis mai al repositori: porta la contrasenya)
+
+host       = "ftp.meteo4u.com"
+user       = "usuari"
+password   = "contrasenya"
+
+; Carpeta del servidor on hi ha (o hi haurà) l'index.html de la web nova.
+; Les dades van a <web_root>/visors/<nom>/
+web_root   = "/public_html"
+
+; Només per a l'script antic (pujar_sst_web.php). Deixa-la mentre el facis servir.
+remote_dir = "/public_html/sst"
+
+tls        = true        ; FTPS (xifrat). Posa false només si el servidor no l'accepta
+port       = 21
