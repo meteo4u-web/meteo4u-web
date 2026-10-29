@@ -1263,6 +1263,8 @@
   }
   playBtn.addEventListener("click", () => setPlaying(!timer));
   document.addEventListener("keydown", e => {
+    // No interceptar tecles als controls de formulari (selectors del panell de descàrrega, botons…)
+    if (e.target.closest && e.target.closest("select, textarea, button, .dl-panel")) return;
     if (e.target.tagName === "INPUT" && e.target.type !== "range") return;
     if (e.key === "ArrowRight") { setPlaying(false); setFrame(frame + 1); }
     if (e.key === "ArrowLeft")  { setPlaying(false); setFrame(frame - 1); }

@@ -293,8 +293,6 @@
 
   // Els valors venen en un PNG de 16 bits: valor = (R*256 + G) * scale + offset, A = 0 terra.
   // El JSON només porta metadades, paleta, estadístiques i isotermes.
-  // Els valors venen en un PNG de 16 bits: valor = (R*256 + G) * scale + offset, A = 0 terra.
-  // El JSON només porta metadades, paleta, estadístiques i isotermes.
   // Resultat: D.values = Float32Array en °C, NaN = terra/sense dada (ràpid i lleuger).
   async function loadField(url) {
     const D = await loadJson(url);
