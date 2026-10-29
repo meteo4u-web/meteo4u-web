@@ -2,3 +2,5 @@
 visors/*/*.json
 visors/*/*.png
 visors/*/*.geojson
+visors/radar/radar_index.js
+visors/radar/frames/

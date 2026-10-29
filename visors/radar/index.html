@@ -836,7 +836,11 @@ $("expVid").onclick = exportVideo;
 window.addEventListener("resize", updateGuide);
 $("optsToggle").onclick = function(){ $("opts").classList.toggle("open"); };
 document.addEventListener("keydown", function(e){
-  if (e.target.tagName === "SELECT" || e.target.tagName === "INPUT" && e.target.type !== "range") return;
+  // Els controls de formulari (també els lliscants d'opacitat i llindar, i el de temps, que ja es mou sol
+  // amb les fletxes) gestionen les seves tecles; l'espai en un botó el prem en lloc de fer play
+  var tg = e.target.tagName;
+  if (tg === "SELECT" || tg === "TEXTAREA" || tg === "INPUT" && !(e.key === " " && e.target.type === "range")) return;
+  if (e.key === " " && tg === "BUTTON") return;
   if (e.key === " "){ e.preventDefault(); play(!playing); }
   else if (e.key === "ArrowLeft"){ play(false); show(cur - 1); }
   else if (e.key === "ArrowRight"){ play(false); show(cur + 1); }
