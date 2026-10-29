@@ -1,0 +1,4 @@
+# Dades generades dels visors: es pugen directament al servidor, no al repositori
+visors/*/*.json
+visors/*/*.png
+visors/*/*.geojson
