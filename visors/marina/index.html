@@ -882,9 +882,14 @@
   }
   playBtn.addEventListener("click", () => setPlaying(!timer));
   document.addEventListener("keydown", e => {
+    // Al panell de descàrrega les tecles són dels seus controls; l'espai en un botó el prem (no fa play)
+    if (e.target.closest && e.target.closest(".dl-panel")) return;
+    if (e.key === " " && e.target.tagName === "BUTTON") return;
+    if (e.target.tagName === "SELECT") return;
     if (e.target.tagName === "INPUT" && e.target.type !== "range") return;
-    if (e.key === "ArrowRight") { setPlaying(false); setFrame(frame + 1); }
-    if (e.key === "ArrowLeft")  { setPlaying(false); setFrame(frame - 1); }
+    const enSlider = e.target.type === "range";            // el control lliscant ja es mou sol amb les fletxes
+    if (e.key === "ArrowRight" && !enSlider) { setPlaying(false); setFrame(frame + 1); }
+    if (e.key === "ArrowLeft" && !enSlider)  { setPlaying(false); setFrame(frame - 1); }
     if (e.key === " ") { e.preventDefault(); setPlaying(!timer); }
   });
 
