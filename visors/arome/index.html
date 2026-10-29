@@ -1,0 +1,1913 @@
+<!DOCTYPE html>
+<html lang="ca">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Previsió AROME · temps</title>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow:wght@400;500&family=Barlow+Semi+Condensed:wght@500;600;700&display=swap">
+<style>
+  :root {
+    --ink: #102030;
+    --ink-soft: #4a6075;
+    --panel: rgba(244, 247, 250, 0.94);
+    --line: #b9c8d6;
+    --sea: #c8dce8;
+    --sans: "Barlow", "Helvetica Neue", Arial, sans-serif;
+    --cond: "Barlow Semi Condensed", "Arial Narrow", Arial, sans-serif;
+  }
+  html, body { height: 100%; margin: 0; }
+  body { background: var(--sea); color: var(--ink); font-family: var(--sans); }
+  #map { position: absolute; inset: 0; background: var(--sea); }
+  .field-canvas { opacity: 0.85; pointer-events: none; }
+  .arrow-canvas, .flow-canvas { pointer-events: none; }
+
+  .panel {
+    position: absolute; z-index: 1000; top: max(12px, env(safe-area-inset-top));
+    left: 12px; width: 228px; padding: 10px 12px 9px;
+    background: var(--panel); border-radius: 6px;
+    box-shadow: 0 1px 3px rgba(16, 32, 48, 0.25);
+  }
+  .panel h1 { font-family: var(--cond); font-weight: 600; font-size: 17px; line-height: 1.15; margin: 0; }
+  .sub { color: var(--ink-soft); font-size: 12px; margin-top: 1px; }
+
+  .layers { display: grid; grid-template-columns: 1fr 1fr; gap: 3px; margin-top: 7px; }
+  .layers button {
+    padding: 4px 4px; border: 1px solid var(--line); border-radius: 4px; background: transparent;
+    color: var(--ink-soft); font-family: var(--cond); font-weight: 500; font-size: 13px; white-space: nowrap; cursor: pointer; text-align: center;
+  }
+  .layers button[aria-pressed="true"] { background: var(--ink); color: #fff; border-color: var(--ink); }
+  .layers button:focus-visible, .play:focus-visible { outline: 2px solid var(--ink); outline-offset: 1px; }
+  /* Selector d'unitats del vent (km/h · kt) */
+  .units { display: flex; align-items: center; gap: 6px; margin-top: 6px; font-size: 12px; color: var(--ink-soft); }
+  .units[hidden] { display: none; }
+  .units .seg { display: flex; flex: 1; border: 1px solid var(--line); border-radius: 4px; overflow: hidden; }
+  .units button {
+    flex: 1; padding: 3px 0; border: 0; background: transparent; cursor: pointer;
+    color: var(--ink-soft); font-family: var(--cond); font-weight: 500; font-size: 13px;
+  }
+  .units button + button { border-left: 1px solid var(--line); }
+  .units button[aria-pressed="true"] { background: var(--ink); color: #fff; }
+  .units button:focus-visible { outline: 2px solid var(--ink); outline-offset: -2px; }
+
+  .when { margin-top: 8px; padding-top: 7px; border-top: 1px solid var(--line); }
+  .when-label { font-family: var(--cond); font-weight: 600; font-size: 16px; }
+  .when-utc { font-size: 11px; color: var(--ink-soft); font-variant-numeric: tabular-nums; }
+  .timebar { display: flex; align-items: center; gap: 7px; margin-top: 4px; }
+  .play {
+    flex: none; width: 28px; height: 24px; border-radius: 4px; border: 1px solid var(--ink);
+    background: var(--ink); color: #fff; font-size: 12px; cursor: pointer; line-height: 1;
+  }
+  .timebar input[type=range] { flex: 1; accent-color: var(--ink); }
+
+  .readout { display: flex; align-items: center; gap: 10px; margin: 8px 0 1px; min-height: 38px; }
+  .swatch { width: 11px; align-self: stretch; border-radius: 2px; border: 1px solid var(--line); }
+  .value { font-family: var(--cond); font-weight: 700; font-size: 32px; line-height: 1; font-variant-numeric: tabular-nums; }
+  .value small { font-size: 16px; font-weight: 500; margin-left: 3px; color: var(--ink-soft); }
+  .value.empty { font-size: 13.5px; font-weight: 500; color: var(--ink-soft); font-family: var(--sans); }
+  .second, .coords { font-size: 12px; color: var(--ink-soft); font-variant-numeric: tabular-nums; min-height: 1.3em; }
+  .maxline { font-size: 12px; color: var(--ink-soft); margin-top: 5px; }
+  .maxline b { color: var(--ink); font-family: var(--cond); font-size: 14px; }
+
+  .toggle { display: flex; align-items: center; gap: 7px; margin-top: 6px; font-size: 13px; cursor: pointer; }
+  .toggle input { width: 14px; height: 14px; margin: 0; accent-color: var(--ink); }
+
+  .legend {
+    position: absolute; z-index: 1000; right: 12px; top: 50%; transform: translateY(-50%);
+    height: min(70vh, 520px); width: 70px; padding: 10px 8px;
+    background: var(--panel); border-radius: 6px; box-shadow: 0 1px 3px rgba(16, 32, 48, 0.25);
+    box-sizing: border-box;
+  }
+  .legend .unit { position: absolute; top: -20px; left: 0; right: 0; text-align: center; font-size: 12px; color: var(--ink-soft); }
+  .legend .bar { position: absolute; left: 10px; top: 10px; bottom: 10px; width: 16px; border: 1px solid var(--line); }
+  .legend .tick { position: absolute; left: 30px; font-size: 11px; color: var(--ink-soft); transform: translateY(50%); font-variant-numeric: tabular-nums; }
+  .legend .marker { position: absolute; left: 2px; width: 32px; height: 0; border-top: 2px solid var(--ink); display: none; }
+
+  .tip {
+    position: absolute; z-index: 1001; pointer-events: none; display: none;
+    padding: 3px 7px; border-radius: 3px; background: var(--ink); color: #fff;
+    font-family: var(--cond); font-weight: 600; font-size: 15px; white-space: nowrap;
+    transform: translate(12px, -130%);
+  }
+  .credit {
+    position: absolute; z-index: 1000; left: 12px; bottom: max(8px, env(safe-area-inset-bottom));
+    font-size: 11px; color: var(--ink-soft); background: var(--panel); padding: 3px 7px; border-radius: 3px;
+  }
+  /* Menú de descàrrega (botó discret a dalt a la dreta) */
+  .dl-btn {
+    width: 34px; height: 34px; display: grid; place-items: center; cursor: pointer;
+    background: #fff; border: 2px solid rgba(0,0,0,0.2); border-radius: 4px; background-clip: padding-box;
+    color: var(--ink); padding: 0;
+  }
+  .dl-btn:hover { background: #f4f4f4; }
+  .dl-btn:focus-visible { outline: 2px solid var(--ink); outline-offset: 1px; }
+  .dl-panel {
+    position: absolute; z-index: 1100; right: 12px; top: 56px; width: 270px;
+    background: var(--panel); border-radius: 6px; box-shadow: 0 2px 10px rgba(16, 32, 48, 0.3);
+    padding: 11px 13px 12px; font-size: 13px; color: var(--ink);
+  }
+  .dl-panel[hidden] { display: none; }
+  .dl-panel h2 { font-family: var(--cond); font-weight: 600; font-size: 16px; margin: 0 0 6px; }
+  .dl-close { position: absolute; top: 6px; right: 8px; border: 0; background: none; font-size: 18px; color: var(--ink-soft); cursor: pointer; }
+  .dl-row { margin-top: 8px; }
+  .dl-row > .dl-lab { display: block; font-size: 11.5px; color: var(--ink-soft); margin-bottom: 3px; }
+  .dl-seg { display: flex; border: 1px solid var(--line); border-radius: 4px; overflow: hidden; }
+  .dl-seg label { flex: 1; text-align: center; padding: 4px 0; cursor: pointer; font-family: var(--cond); font-weight: 500; font-size: 13.5px; color: var(--ink-soft); }
+  .dl-seg label + label { border-left: 1px solid var(--line); }
+  .dl-seg input { position: absolute; opacity: 0; pointer-events: none; }
+  .dl-seg label:has(input:checked) { background: var(--ink); color: #fff; }
+  .dl-seg label:has(input:focus-visible) { outline: 2px solid var(--ink); outline-offset: -2px; }
+  .dl-panel select { width: 100%; font: inherit; font-size: 13px; padding: 3px 4px; border: 1px solid var(--line); border-radius: 4px; background: #fff; color: var(--ink); }
+  .dl-two { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+  .dl-note { font-size: 11.5px; color: var(--ink-soft); margin-top: 3px; line-height: 1.35; }
+  .dl-check { display: flex; align-items: center; gap: 6px; margin-top: 8px; cursor: pointer; }
+  .dl-check input { margin: 0; accent-color: var(--ink); }
+  .dl-go { margin-top: 11px; width: 100%; padding: 7px; border: 0; border-radius: 4px; background: var(--ink); color: #fff; font-family: var(--cond); font-weight: 600; font-size: 14.5px; cursor: pointer; }
+  .dl-go:disabled { opacity: 0.6; cursor: default; }
+  .dl-prog { margin-top: 7px; font-size: 12px; color: var(--ink-soft); min-height: 1.2em; }
+  .dl-prog progress { width: 100%; height: 6px; accent-color: var(--ink); }
+  .dl-video-only[hidden] { display: none; }
+  @media (max-width: 600px) { .dl-panel { right: 8px; left: 8px; width: auto; top: 56px; } }
+
+  .loading {
+    position: absolute; z-index: 1002; left: 50%; top: 14px; transform: translateX(-50%);
+    background: var(--ink); color: #fff; padding: 5px 12px; border-radius: 4px; font-size: 14px; display: none;
+  }
+  .error { position: absolute; z-index: 1003; inset: 0; display: none; place-items: center; background: var(--sea); }
+  .error p { max-width: 460px; background: var(--panel); padding: 18px 20px; border-radius: 6px; line-height: 1.45; }
+
+  .sst-popup .leaflet-popup-content-wrapper { border-radius: 6px; background: var(--panel); color: var(--ink); }
+  .sst-popup .leaflet-popup-content { margin: 10px 26px 10px 12px; font-family: var(--sans); }
+  .pp { display: flex; gap: 10px; align-items: stretch; }
+  .pp-sw { width: 10px; border-radius: 2px; border: 1px solid var(--line); flex: none; }
+  .pp-val { font-family: var(--cond); font-weight: 700; font-size: 24px; line-height: 1.1; }
+  .pp-val.pp-empty { font-size: 15px; font-weight: 500; font-family: var(--sans); color: var(--ink-soft); }
+  .pp-stats { margin-top: 7px; padding-top: 6px; border-top: 1px solid var(--line); }
+  .pp-mm { font-size: 12.5px; color: var(--ink-soft); margin-top: 2px; display: flex; align-items: center; gap: 5px; font-variant-numeric: tabular-nums; }
+  .pp-mm b { color: var(--ink); font-family: var(--cond); font-weight: 600; font-size: 14.5px; }
+  .pp-mm-sw { width: 9px; height: 9px; border-radius: 2px; border: 1px solid var(--line); flex: none; }
+  .pp-line { font-size: 12.5px; color: var(--ink-soft); margin-top: 3px; font-variant-numeric: tabular-nums; }
+  /* Gràfica de la sèrie temporal a la finestra del clic */
+  .pp-chart { margin-top: 8px; padding-top: 6px; border-top: 1px solid var(--line); }
+  .pp-chart-h { display: flex; justify-content: space-between; align-items: baseline; font-size: 11.5px; color: var(--ink-soft); }
+  .pp-chart-h b { font-family: var(--cond); font-weight: 600; font-size: 13px; color: var(--ink); }
+  .pp-chart svg { display: block; margin-top: 2px; cursor: crosshair; font-variant-numeric: tabular-nums; }
+  .pp-chart .ax { font: 500 9.5px var(--sans); fill: var(--ink-soft); }
+  .pp-chart .day { font: 600 10.5px var(--cond); fill: var(--ink); }
+  .pp-chart .grid { stroke: var(--line); stroke-width: 0.7; stroke-dasharray: 2 3; }
+  .pp-chart .mid { stroke: #9fb1c1; stroke-width: 0.8; }
+  .pp-chart .now { stroke: var(--ink); stroke-width: 1; opacity: 0.45; }
+  .pp-chart .ext { font: 600 10.5px var(--cond); fill: var(--ink); paint-order: stroke; stroke: var(--panel); stroke-width: 3px; }
+  .pp-chart .tipbg { fill: var(--ink); }
+  .pp-chart .tiptx { font: 600 11px var(--cond); fill: #fff; }
+  .pp-chart-load { height: 132px; display: grid; place-items: center; font-size: 12px; color: var(--ink-soft); }
+  .nom-lloc { white-space: nowrap; pointer-events: none; }
+  .nom-lloc i { position: absolute; left: 0; top: 0; width: 6px; height: 6px; border-radius: 50%; background: #17222d; box-shadow: 0 0 0 1.2px #fff; }
+  .nom-lloc span { position: absolute; left: 10px; top: -6px; font: 600 12.5px var(--cond); color: #17222d;
+    text-shadow: 0 0 2px #fff, 0 0 2px #fff, 0 0 3px #fff, 0 0 4px rgba(255,255,255,0.8); }
+  .pp-leg { display: flex; gap: 10px; font-size: 11px; color: var(--ink-soft); }
+  .pp-leg i { display: inline-block; width: 10px; height: 3px; border-radius: 2px; margin-right: 4px; vertical-align: middle; }
+
+  /* Núvols: lectura de 3 nivells i llegenda triple */
+  .tri-read { display: flex; gap: 9px; }
+  .tri-read > div { border-left: 4px solid var(--line); padding-left: 5px; }
+  .tri-read b { display: block; font-family: var(--cond); font-weight: 700; font-size: 24px; line-height: 1; font-variant-numeric: tabular-nums; }
+  .tri-read b small { font-size: 13px; font-weight: 500; color: var(--ink-soft); margin-left: 1px; }
+  .tri-read span { font-size: 11px; color: var(--ink-soft); }
+  .legend.tri { width: 88px; }
+  .legend .tri-bar { position: absolute; top: 10px; bottom: 10px; width: 12px; border: 1px solid var(--line); background-color: #fff; }
+  .legend .tri-lab { position: absolute; top: -20px; width: 14px; text-align: center; font-size: 12px; color: var(--ink-soft); font-family: var(--cond); font-weight: 600; }
+  .pp-c3 { display: flex; align-items: center; gap: 6px; font-size: 13px; color: var(--ink-soft); margin-top: 2px; }
+  .pp-c3 b { color: var(--ink); font-family: var(--cond); font-size: 16px; min-width: 38px; }
+
+  @media (max-width: 600px) {
+    .panel { width: auto; right: 92px; }
+    .value { font-size: 28px; }
+    .credit { display: none; }
+  }
+</style>
+</head>
+<body>
+<div id="map"></div>
+
+<section class="panel" aria-live="polite">
+  <h1>Previsió AROME</h1>
+  <div class="sub" id="sub">Carregant…</div>
+  <div class="layers" id="layers" role="group" aria-label="Capa"></div>
+  <div class="units" id="units" hidden><span>Unitats</span><div class="seg" id="units-seg" role="group" aria-label="Unitats del vent"></div></div>
+
+  <div class="when">
+    <div class="when-label" id="when">–</div>
+    <div class="when-utc" id="when-utc"></div>
+    <div class="timebar">
+      <button class="play" id="play" type="button" aria-label="Reprodueix">▶</button>
+      <input type="range" id="slider" min="0" max="0" value="0" aria-label="Hora de previsió">
+    </div>
+  </div>
+
+  <div class="readout">
+    <div class="swatch" id="swatch"></div>
+    <div class="value empty" id="value">Passa el cursor pel mapa</div>
+  </div>
+  <div class="second" id="second"></div>
+  <div class="coords" id="coords"></div>
+  <div class="maxline" id="maxline"></div>
+  <label class="toggle" id="flow-lab"><input type="checkbox" id="flow-toggle" checked> Animació del vent</label>
+  <label class="toggle" id="arrows-lab"><input type="checkbox" id="arrows-toggle"> <span id="arrows-txt">Mostra fletxes de direcció</span></label>
+</section>
+
+<div class="legend" id="legend" aria-hidden="true">
+  <div class="unit" id="legend-unit"></div>
+  <div class="bar" id="legend-bar"></div>
+  <div class="marker" id="legend-marker"></div>
+</div>
+
+<div class="dl-panel" id="dl-panel" hidden role="dialog" aria-labelledby="dl-title">
+  <button class="dl-close" id="dl-close" type="button" aria-label="Tanca">×</button>
+  <h2 id="dl-title">Descarregar</h2>
+  <div class="dl-row">
+    <div class="dl-seg" role="radiogroup" aria-label="Format">
+      <label><input type="radio" name="dl-fmt" value="png" checked> Imatge PNG</label>
+      <label><input type="radio" name="dl-fmt" value="mp4"> Vídeo MP4</label>
+    </div>
+  </div>
+  <div class="dl-row">
+    <span class="dl-lab">Zona</span>
+    <div class="dl-note">La que veus ara al mapa. Mou-lo o fes zoom per triar-la.</div>
+  </div>
+  <div class="dl-row">
+    <label class="dl-lab" for="dl-size">Mida</label>
+    <select id="dl-size">
+      <option value="screen">Com la pantalla</option>
+      <option value="1280x720">1280 × 720 (HD)</option>
+      <option value="1920x1080" selected>1920 × 1080 (Full HD)</option>
+      <option value="1080x1080">1080 × 1080 (quadrat)</option>
+      <option value="1080x1350">1080 × 1350 (vertical)</option>
+      <option value="1080x1920">1080 × 1920 (stories)</option>
+    </select>
+  </div>
+  <div class="dl-row dl-video-only" hidden>
+    <span class="dl-lab">Hores</span>
+    <div class="dl-two">
+      <select id="dl-from" aria-label="Des de"></select>
+      <select id="dl-to" aria-label="Fins a"></select>
+    </div>
+  </div>
+  <div class="dl-row dl-video-only" hidden>
+    <label class="dl-lab" for="dl-speed">Velocitat</label>
+    <select id="dl-speed">
+      <option value="0.2">Ràpida (5 hores per segon)</option>
+      <option value="0.4" selected>Normal (2,5 hores per segon)</option>
+      <option value="0.8">Lenta (1,25 hores per segon)</option>
+    </select>
+  </div>
+  <label class="dl-check" id="dl-arrows-lab"><input type="checkbox" id="dl-arrows"> <span id="dl-arrows-txt">Fletxes de direcció</span></label>
+  <button class="dl-go" id="dl-go" type="button">Descarregar</button>
+  <div class="dl-prog" id="dl-prog" aria-live="polite"></div>
+</div>
+
+<div class="tip" id="tip"></div>
+<div class="credit" id="credit">@enricagud</div>
+<div class="loading" id="loading">Carregant capa…</div>
+<div class="error" id="error"><p id="error-msg"></p></div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+<script>
+(async function () {
+  // ---------------------------------------------------------
+  // CONFIGURACIÓ
+  // ---------------------------------------------------------
+  // URL: ?capa=temp|vent|precip|neu|acum|nuvols   ?vista=lon_min,lon_max,lat_min,lat_max | tot
+  const params = new URLSearchParams(location.search);
+  const INDEX_URL = params.get("index") || "arome_index.json";
+  const VISTA_INICIAL = null;   // null = tot el domini de les dades · o bé [lon_min, lon_max, lat_min, lat_max]
+  const VELOCITAT_MS = 600;                              // ms per fotograma en reproduir
+  // ── SUAVITZAT DELS CONTORNS ──────────────────────────────────────────────────
+  // Passades de filtre binomial 3x3 abans de pintar (0 = cap). Cada passada suavitza ~1 punt de malla
+  // (2,5 km). Només afecta el dibuix: el valor que surt amb el cursor és el del model sense suavitzar.
+  const SUAVITZAT = 3;                                   // per a les capes que no surten a la llista
+  const SUAVITZAT_CAPA = { precip: 4, neu: 4, acum: 3, temp: 2, vent: 2, nuvols: 3 };
+  // Vora de les taques (precipitació, neu, acumulada): en lloc d'un tall sec al primer llindar,
+  // s'esvaeix entre llindar × (1 − VORA_SUAU) i el llindar. 0 = tall sec.
+  const VORA_SUAU = 0.6;
+  // Colors en degradat dins de cada tram de la paleta (true) o trams de color pla (false)
+  const DEGRADAT_CAPA = { precip: false, neu: false, acum: false, temp: false, vent: false };
+  // ── COSTA, FRONTERES I NOMS ──────────────────────────────────────────────────
+  const ESTIL_COSTA = {                                  // [halo, línia] per a cada tipus del costa.geojson
+    costa:    [{ color: "#ffffff", weight: 2.6, opacity: 0.5 }, { color: "#17222d", weight: 1.1, opacity: 0.85 }],
+    frontera: [{ color: "#ffffff", weight: 2.4, opacity: 0.4 }, { color: "#17222d", weight: 0.9, opacity: 0.7, dashArray: "5 3" }],
+  };
+  const NOMS_LLOCS = true;                               // noms de ciutats damunt del camp (llista pròpia, sense servidors externs)
+  // [nom, lat, lon, nivell]: nivell 1 es veu sempre; nivell 2 només amb més zoom (ZOOM_NIVELL2)
+  const CIUTATS = [
+    ["Barcelona", 41.387, 2.170, 1], ["Girona", 41.979, 2.821, 1], ["Lleida", 41.617, 0.620, 1], ["Tarragona", 41.119, 1.245, 1],
+    ["Tortosa", 40.812, 0.521, 2], ["Manresa", 41.728, 1.823, 2], ["Vic", 41.930, 2.255, 2], ["Figueres", 42.267, 2.961, 2],
+    ["Puigcerdà", 42.432, 1.928, 2], ["la Seu d'Urgell", 42.358, 1.456, 2], ["Vielha", 42.702, 0.796, 2], ["Tremp", 42.167, 0.894, 2],
+    ["Reus", 41.155, 1.107, 2], ["Mataró", 41.540, 2.444, 2], ["Andorra la Vella", 42.507, 1.522, 2], ["Perpinyà", 42.699, 2.895, 1],
+    ["Palma", 39.570, 2.650, 1], ["Maó", 39.889, 4.265, 1], ["Eivissa", 38.907, 1.432, 1], ["Ciutadella", 40.001, 3.840, 2],
+    ["València", 39.470, -0.376, 1], ["Castelló", 39.986, -0.051, 2], ["Saragossa", 41.649, -0.889, 1], ["Osca", 42.136, -0.408, 2],
+    ["Tolosa", 43.604, 1.444, 1], ["Montpeller", 43.611, 3.877, 1], ["Marsella", 43.296, 5.370, 1], ["Niça", 43.703, 7.266, 1],
+    ["Tolón", 43.124, 5.928, 2], ["Narbona", 43.184, 3.004, 2], ["Bastia", 42.697, 9.450, 2], ["Ajaccio", 41.919, 8.738, 1],
+    ["Càller", 39.224, 9.121, 1], ["l'Alguer", 40.558, 8.320, 2], ["Alger", 36.754, 3.059, 1], ["Gènova", 44.405, 8.946, 1],
+  ];
+  const ZOOM_NIVELL2 = 7.5;
+  const BICUBICA = true;                                 // contorns arrodonits (false = bilineal)
+  const PIXEL = 2;                                       // resolució del dibuix: 1 = cada píxel, 2 = cada 2 px (més ràpid)
+  const ARROW_SPACING = 48;                              // px mínims entre fletxes
+  // ── VENT: UNITATS I BARBES ───────────────────────────────────────────────────
+  // Unitats que es poden triar al panell (la primera de la URL ?unitats=kt o l'última triada es recorda)
+  const UNITATS_VENT = ["km/h", "kt"];
+  // Llindars "rodons" de la paleta del vent en cada unitat (mateix nombre que la paleta del JSON, en km/h).
+  // Si la paleta del JSON canvia de llargada, es fa servir la conversió directa dels llindars.
+  const LLINDARS_VENT = {
+    "km/h": null,                                                          // els del JSON
+    "kt":   [0, 3, 5, 8, 10, 15, 20, 25, 30, 35, 40, 45, 50, 60, 80],
+  };
+  // Barbes de vent (en lloc de fletxes a la capa de vent): ploma llarga = 10 kt, mitja = 5 kt, banderola = 50 kt.
+  // Sempre en nusos, sigui quina sigui la unitat triada. Es dibuixen als punts de la malla del model:
+  // com més zoom, més barbes, fins a una per punt de malla.
+  const BARBES = true;
+  const BARB_SPACING = 34;                               // px mínims entre barbes (més petit = més barbes)
+  const BARB = { pal: 21, ploma: 9, separacio: 3.6, banderola: 4.6 };   // px: pal, ploma, separació entre plomes, amplada banderola
+  // Animació de partícules (efecte visual: la velocitat NO és la física de l'onada)
+  const FLOW = {
+    densitat: 650,      // px² de pantalla per partícula (més petit = més partícules)
+    vidaMin: 50, vidaMax: 110,   // fotogrames d'animació que viu cada partícula
+    velMin: 0.5, velMax: 2.6,    // px per fotograma d'animació (valors baixos → altos)
+    esvaiment: 0.93,    // 0-1: com més alt, més llarg el rastre
+    color: "rgba(255,255,255,0.85)", gruix: 1.3,
+  };
+  // Animació de les onades: crestes perpendiculars a la propagació que avancen
+  const ONES = {
+    densitat: 2200,     // px² per cresta (més petit = més crestes)
+    vidaMin: 70, vidaMax: 150,   // fotogrames d'animació (aparèixer → esvair-se)
+    velMin: 0.25, velMax: 1.1,   // px per fotograma (onada petita → gran)
+    llargMin: 7, llargMax: 18,   // longitud de la cresta en px (onada petita → gran)
+    corba: 0.22,        // curvatura de la cresta (0 = recta)
+    color: "#ffffff", alfa: 0.9, gruix: 1.6,
+  };
+  const TZ = "Europe/Madrid";
+
+  const fmt = (x, d = 1) => x.toLocaleString("ca-ES", { minimumFractionDigits: d, maximumFractionDigits: d });
+  const RUMBS = ["N", "NNE", "NE", "ENE", "E", "ESE", "SE", "SSE", "S", "SSO", "SO", "OSO", "O", "ONO", "NO", "NNO"];
+  const rumb = deg => RUMBS[Math.round(((deg % 360) + 360) % 360 / 22.5) % 16];
+
+  const trim = s => s.includes(",") ? s.replace(/0+$/, "").replace(/,$/, "") : s;
+  // Format per capa
+  const FORMAT = {
+    m:     { big: v => `${fmt(v, 1)}<small>m</small>`, short: v => `${fmt(v, 1)} m`, tick: t => trim(fmt(t, 2)) },
+    s:     { big: v => `${fmt(v, 1)}<small>s</small>`, short: v => `${fmt(v, 1)} s`, tick: t => String(t) },
+    "m/s": { big: v => `${fmt(v, 2)}<small>m/s</small>`, short: v => `${fmt(v, 2)} m/s (${fmt(v * 1.94384, 1)} kn)`, tick: t => trim(fmt(t, 2)) },
+    "°C":   { big: v => `${fmt(v, 1)}<small>°C</small>`, short: v => `${fmt(v, 1)} °C`, tick: t => String(t) },
+    "km/h": { big: v => `${Math.round(v)}<small>km/h</small>`, short: v => `${Math.round(v)} km/h (${Math.round(v / 1.852)} kt)`, tick: t => String(t) },
+    "kt":   { big: v => `${Math.round(v)}<small>kt</small>`, short: v => `${Math.round(v)} kt (${Math.round(v * 1.852)} km/h)`, tick: t => String(t) },
+    "mm/h": { big: v => `${fmt(v, 1)}<small>mm/h</small>`, short: v => `${fmt(v, 1)} mm/h`, tick: t => trim(fmt(t, 1)) },
+    "cm/h": { big: v => `${fmt(v, 1)}<small>cm/h</small>`, short: v => `${fmt(v, 1)} cm/h`, tick: t => trim(fmt(t, 1)) },
+    "mm":   { big: v => `${fmt(v, 1)}<small>mm</small>`, short: v => `${fmt(v, 1)} mm`, tick: t => trim(fmt(t, 1)) },
+    "%":    { big: v => `${Math.round(v)}<small>%</small>`, short: v => `${Math.round(v)} %`, tick: t => String(t) },
+  };
+  // Núvols: color i opacitat segons la coberta (%) de cada nivell
+  const hexRgb = h => [1, 3, 5].map(k => parseInt(h.slice(k, k + 2), 16));
+  function cloudRGBA(Ly, k, c) {
+    const r = Ly.rampRgb[k], t = Math.max(0, Math.min(1, c / 100));
+    const a = c <= Ly.minCover ? 0 : Ly.alfa[k] * Math.pow((c - Ly.minCover) / (100 - Ly.minCover), 0.7);   // entrada suau, sense vora
+    return [r[0][0] + (r[1][0] - r[0][0]) * t, r[0][1] + (r[1][1] - r[0][1]) * t, r[0][2] + (r[1][2] - r[0][2]) * t, a];
+  }
+  const cloudCss = (Ly, k, c) => { const [r, g, b, a] = cloudRGBA(Ly, k, c); return `rgba(${r | 0},${g | 0},${b | 0},${a.toFixed(3)})`; };
+  const dirText = (kind, to) => kind === "to"
+    ? `cap al ${rumb(to)} (${Math.round(to)}°)`
+    : `ve del ${rumb(to + 180)} (${Math.round((to + 180) % 360)}°)`;
+
+  function fail(msg) {
+    document.getElementById("error-msg").textContent = msg;
+    document.getElementById("error").style.display = "grid";
+  }
+  async function loadJson(url) {
+    const r = await fetch(url, { cache: "no-cache" });
+    if (!r.ok) throw new Error(`HTTP ${r.status}`);
+    return r.json();
+  }
+
+  // m/s per unitat, per convertir velocitats
+  const SPEED = { "m/s": 1, "km/h": 1 / 3.6, "kt": 1 / 1.943844 };
+  const llegeixPref = k => { try { return localStorage.getItem(k); } catch { return null; } };
+  const desaPref = (k, v) => { try { localStorage.setItem(k, v); } catch { /* sense emmagatzematge */ } };
+  let unitatVent = [params.get("unitats"), llegeixPref("visor_unitats_vent")].find(u => UNITATS_VENT.includes(u)) || null;
+
+  let INDEX;
+  try { INDEX = await loadJson(INDEX_URL); }
+  catch (e) {
+    return fail(`No s'ha pogut carregar ${INDEX_URL} (${e.message}). Comprova que els fitxers són al mateix ` +
+                `directori i que obres la pàgina des d'un servidor web, no amb file://.`);
+  }
+
+  // ---------------------------------------------------------
+  // CAPES: es carreguen sota demanda i es guarden en memòria
+  // ---------------------------------------------------------
+  const cache = {};
+  function prepLayer(D) {
+    const L_ = { D, ...D };
+    L_.isClouds = D.kind === "nuvols";
+    L_.hasDir = !!D.has_dir;
+    L_.offset = D.offset || 0;
+    L_.tb = D.transparent_below ?? null;           // per sota d'aquest valor no es pinta (pluja, neu)
+    L_.max = D.max || [];
+    if (L_.isClouds) {
+      L_.rampRgb = D.ramps.map(r => [hexRgb(r.de), hexRgb(r.a)]);
+      L_.minCover = D.min_cover ?? 5;
+      L_.alfa = D.ramps.map(r => r.alfa ?? 0.92);
+    }
+    const pal = D.palette || [[0, "#ffffff"], [100, "#000000"]];
+    L_.thr = pal.map(p => p[0]);
+    L_.NB = pal.length - 1;
+    L_.colors = pal.slice(0, L_.NB).map(p => p[1]);
+    L_.rgb = L_.colors.map(hexRgb);
+    L_.binOf = v => {                     // llindars no uniformes: cerca binària
+      let lo = 0, hi = L_.NB - 1;
+      if (v < L_.thr[0]) return 0;
+      while (lo < hi) { const m = (lo + hi + 1) >> 1; if (L_.thr[m] <= v) lo = m; else hi = m - 1; }
+      return lo;
+    };
+    L_.colorOf = v => L_.colors[L_.binOf(v)];
+    L_.south = D.lat0 - D.dlat / 2; L_.north = D.lat0 + (D.nlat - 0.5) * D.dlat;
+    L_.west  = D.lon0 - D.dlon / 2; L_.east  = D.lon0 + (D.nlon - 0.5) * D.dlon;
+    L_.times = D.times.map(t => new Date(t.replace("Z", ":00Z")));
+    L_.data = new Map();                  // fotogrames descodificats (memòria limitada)
+    L_.pending = new Map();               // descàrregues en curs
+    L_.last = null;                       // últim fotograma disponible (per no deixar el mapa buit)
+    L_.gen = 0;                           // canvia quan es canvien les unitats (descarta descodificacions antigues)
+    // Velocitats: es pot canviar d'unitat. Es guarden els valors originals del JSON.
+    L_.isSpeed = !L_.isClouds && SPEED[D.units] !== undefined;
+    L_.base = { units: D.units, scale: D.scale, offset: L_.offset, max: L_.max.slice(), min: D.min ? D.min.slice() : null,
+                thr: L_.thr.slice(), tb: L_.tb };
+    if (L_.isSpeed && unitatVent) applyUnits(L_, unitatVent);
+    return L_;
+  }
+
+  // Canvia la unitat d'una capa de velocitat: escala de descodificació, màxims, llindars de la paleta
+  // i els fotogrames que ja hi ha a la memòria (sense tornar-los a baixar).
+  function applyUnits(Ly, u) {
+    if (!Ly.isSpeed || !SPEED[u] || Ly.units === u) return;
+    const fOld = SPEED[Ly.base.units] / SPEED[Ly.units], fNew = SPEED[Ly.base.units] / SPEED[u], r = fNew / fOld;
+    Ly.units = u;
+    Ly.scale = Ly.base.scale * fNew;
+    Ly.offset = Ly.base.offset * fNew;
+    Ly.max = Ly.base.max.map(x => x * fNew);
+    if (Ly.base.min) Ly.min = Ly.base.min.map(x => x * fNew);
+    Ly.tb = Ly.base.tb == null ? null : Ly.base.tb * fNew;
+    const nice = LLINDARS_VENT[u];
+    Ly.thr = u === Ly.base.units ? Ly.base.thr.slice()
+      : nice && nice.length === Ly.base.thr.length ? nice.slice()
+      : Ly.base.thr.map(t => Math.round(t * fNew * 10) / 10);
+    const vist = new Set();
+    for (const d of [...Ly.data.values(), Ly.last]) {
+      if (!d || vist.has(d)) continue;
+      vist.add(d);
+      for (const a of d.smooth && d.smooth !== d.vals ? [d.vals, d.smooth] : [d.vals]) for (let k = 0; k < a.length; k++) a[k] *= r;
+    }
+    Ly.pending.clear();
+    Ly.gen++;
+    Ly.statsP = null;                     // els màxims/mínims de cada punt es tornen a llegir en la unitat nova
+  }
+
+  // ---------------------------------------------------------
+  // FOTOGRAMES: un PNG per hora amb les dades codificades
+  //   R,G = valor en 16 bits (× scale) · B = direcció (× 360/256) · A = 255 mar / 0 terra
+  // ---------------------------------------------------------
+  const MAX_FRAMES = 48;
+  const dec = document.createElement("canvas");
+  async function decodePng(url, Ly) {
+    const r = await fetch(url);
+    if (!r.ok) throw new Error(`HTTP ${r.status} (${url})`);
+    // Sense conversió de color ni alfa premultiplicat: els bytes arriben intactes
+    const bmp = await createImageBitmap(await r.blob(), { premultiplyAlpha: "none", colorSpaceConversion: "none" });
+    dec.width = bmp.width; dec.height = bmp.height;
+    const ctx = dec.getContext("2d", { willReadFrequently: true });
+    ctx.clearRect(0, 0, bmp.width, bmp.height);
+    ctx.drawImage(bmp, 0, 0);
+    const px = ctx.getImageData(0, 0, bmp.width, bmp.height).data;
+    const n = Ly.nlat, m = Ly.nlon;
+    if (Ly.isClouds) {                                     // R = baixos, G = mitjans, B = alts (%)
+      const c3 = [0, 1, 2].map(() => new Float32Array(n * m));
+      for (let i = 0; i < n; i++) {
+        const row = n - 1 - i;
+        for (let j = 0; j < m; j++) {
+          const p = (row * m + j) * 4, k = i * m + j;
+          for (let c = 0; c < 3; c++) c3[c][k] = px[p + 3] < 128 ? NaN : px[p + c];
+        }
+      }
+      const dirs = new Int16Array(n * m).fill(-1);
+      return { vals: c3[0], dirs, smooth: c3[0], c3, c3s: c3.map(a => smoothField(a, n, m, SUAVITZAT_CAPA[Ly.layer] ?? SUAVITZAT)) };
+    }
+    const vals = new Float32Array(n * m), dirs = new Int16Array(n * m);
+    for (let i = 0; i < n; i++) {
+      const row = n - 1 - i;                               // fila 0 del PNG = nord
+      for (let j = 0; j < m; j++) {
+        const p = (row * m + j) * 4, k = i * m + j;
+        if (px[p + 3] < 128) { vals[k] = NaN; dirs[k] = -1; continue; }
+        vals[k] = (px[p] * 256 + px[p + 1]) * Ly.scale + Ly.offset;
+        dirs[k] = Ly.hasDir ? Math.round(px[p + 2] * 360 / 256) : -1;
+      }
+    }
+    return { vals, dirs, smooth: smoothField(vals, n, m, SUAVITZAT_CAPA[Ly.layer] ?? SUAVITZAT) };
+  }
+
+  // Suavitzat binomial 3x3 que ignora terra (no arrossega valors cap a la costa)
+  function smoothField(src, n, m, passes) {
+    if (!passes) return src;
+    let a = src, b = new Float32Array(n * m);
+    const W = [1, 2, 1];
+    for (let pass = 0; pass < passes; pass++) {
+      for (let i = 0; i < n; i++) {
+        for (let j = 0; j < m; j++) {
+          const k = i * m + j;
+          if (a[k] !== a[k]) { b[k] = NaN; continue; }
+          let acc = 0, ws = 0;
+          for (let di = -1; di <= 1; di++) {
+            const ii = i + di;
+            if (ii < 0 || ii >= n) continue;
+            for (let dj = -1; dj <= 1; dj++) {
+              const jj = j + dj;
+              if (jj < 0 || jj >= m) continue;
+              const v = a[ii * m + jj];
+              if (v !== v) continue;
+              const w = W[di + 1] * W[dj + 1];
+              acc += w * v; ws += w;
+            }
+          }
+          b[k] = acc / ws;
+        }
+      }
+      const t = a === src ? new Float32Array(n * m) : a;
+      a = b; b = t;
+    }
+    return a;
+  }
+  // Màxim i mínim de cada punt durant tota la previsió (es carreguen al primer clic)
+  //   R,G = valor (× scale) · B = hora des de l'inici · A = mar/terra
+  async function decodeStats(url, Ly) {
+    const r = await fetch(url);
+    if (!r.ok) throw new Error(`HTTP ${r.status} (${url})`);
+    const bmp = await createImageBitmap(await r.blob(), { premultiplyAlpha: "none", colorSpaceConversion: "none" });
+    dec.width = bmp.width; dec.height = bmp.height;
+    const ctx = dec.getContext("2d", { willReadFrequently: true });
+    ctx.clearRect(0, 0, bmp.width, bmp.height);
+    ctx.drawImage(bmp, 0, 0);
+    const px = ctx.getImageData(0, 0, bmp.width, bmp.height).data;
+    const n = Ly.nlat, m = Ly.nlon, vals = new Float32Array(n * m), hrs = new Uint8Array(n * m);
+    for (let i = 0; i < n; i++) {
+      let p = (n - 1 - i) * m * 4, k = i * m;
+      for (let j = 0; j < m; j++, p += 4, k++) {
+        vals[k] = px[p + 3] < 128 ? NaN : (px[p] * 256 + px[p + 1]) * Ly.scale + Ly.offset;
+        hrs[k] = px[p + 2];
+      }
+    }
+    return { vals, hrs };
+  }
+  function loadStats(Ly) {
+    if (!Ly.stats) return Promise.resolve(null);
+    if (!Ly.statsP) {
+      const v = `?v=${Ly.generated}`;
+      Ly.statsP = Promise.all([decodeStats(Ly.stats.max + v, Ly), decodeStats(Ly.stats.min + v, Ly)])
+        .then(([max, min]) => ({ max, min, t0: new Date(Ly.stats.t0.replace("Z", ":00Z")) }))
+        .catch(e => { console.error(e); Ly.statsP = null; return null; });
+    }
+    return Ly.statsP;
+  }
+
+  function loadFrame(Ly, k) {
+    if (Ly.data.has(k)) return Promise.resolve(Ly.data.get(k));
+    if (Ly.pending.has(k)) return Ly.pending.get(k);
+    const g = Ly.gen;
+    const pr = decodePng(`${Ly.frames[k]}?v=${Ly.generated}`, Ly).then(d => {
+      if (Ly.pending.get(k) === pr) Ly.pending.delete(k);
+      if (g !== Ly.gen) return loadFrame(Ly, k);           // s'han canviat les unitats mentre es baixava
+      Ly.data.set(k, d);
+      if (Ly.data.size > MAX_FRAMES) Ly.data.delete(Ly.data.keys().next().value);
+      return d;
+    }, e => { if (Ly.pending.get(k) === pr) Ly.pending.delete(k); throw e; });
+    Ly.pending.set(k, pr);
+    return pr;
+  }
+  // Dades del fotograma actual (o l'últim que s'ha pogut mostrar, mentre arriba)
+  function frameData() {
+    const d = layer.data.get(frame);
+    if (d) { layer.last = d; return d; }
+    return layer.last;
+  }
+  // Mostra el fotograma k quan estigui descarregat, i precarrega els següents
+  function ensureFrame(k) {
+    const Ly = layer;
+    loadFrame(Ly, k).then(() => {
+      if (Ly === layer && k === frame) { fieldLayer.redraw(); arrowLayer.redraw(); if (lastLL) show(lastLL, lastPt); }
+    }).catch(e => console.error(e));
+    for (let a = 1; a <= 3; a++) loadFrame(Ly, (k + a) % Ly.times.length).catch(() => {});
+  }
+  // Valor interpolat (bilineal) en un índex fraccionari de la malla, ignorant terra.
+  // Retorna NaN si el punt és majoritàriament terra (pes vàlid < 0.5): així la costa queda suau.
+  function interp(Ly, vals, fi, fj) {
+    const n = Ly.nlat, m = Ly.nlon;
+    let i0 = Math.floor(fi), j0 = Math.floor(fj);
+    const t = fi - i0, u = fj - j0;
+    let i1 = i0 + 1, j1 = j0 + 1;
+    if (i0 < 0) i0 = 0; if (i1 > n - 1) i1 = n - 1; if (i0 > n - 1) i0 = n - 1; if (i1 < 0) i1 = 0;
+    if (j0 < 0) j0 = 0; if (j1 > m - 1) j1 = m - 1; if (j0 > m - 1) j0 = m - 1; if (j1 < 0) j1 = 0;
+    let acc = 0, ws = 0, v, w;
+    v = vals[i0 * m + j0]; w = (1 - t) * (1 - u); if (v === v && w > 0) { acc += w * v; ws += w; }
+    v = vals[i0 * m + j1]; w = (1 - t) * u;       if (v === v && w > 0) { acc += w * v; ws += w; }
+    v = vals[i1 * m + j0]; w = t * (1 - u);       if (v === v && w > 0) { acc += w * v; ws += w; }
+    v = vals[i1 * m + j1]; w = t * u;             if (v === v && w > 0) { acc += w * v; ws += w; }
+    return ws >= 0.5 ? acc / ws : NaN;
+  }
+
+  // Catmull-Rom: passa pels valors de la malla i fa corbes de nivell arrodonides
+  function cr(p0, p1, p2, p3, t) {
+    const t2 = t * t, t3 = t2 * t;
+    return 0.5 * ((2 * p1) + (-p0 + p2) * t + (2 * p0 - 5 * p1 + 4 * p2 - p3) * t2 + (-p0 + 3 * p1 - 3 * p2 + p3) * t3);
+  }
+  function interpCubic(Ly, vals, fi, fj) {
+    const n = Ly.nlat, m = Ly.nlon;
+    const i1 = Math.floor(fi), j1 = Math.floor(fj);
+    if (i1 < 1 || j1 < 1 || i1 > n - 3 || j1 > m - 3) return interp(Ly, vals, fi, fj);
+    const t = fi - i1, u = fj - j1;
+    const r = [0, 0, 0, 0];
+    for (let a = 0; a < 4; a++) {
+      const base = (i1 - 1 + a) * m + j1 - 1;
+      const v0 = vals[base], v1 = vals[base + 1], v2 = vals[base + 2], v3 = vals[base + 3];
+      if (v0 !== v0 || v1 !== v1 || v2 !== v2 || v3 !== v3) return interp(Ly, vals, fi, fj);
+      r[a] = cr(v0, v1, v2, v3, u);
+    }
+    return cr(r[0], r[1], r[2], r[3], t);
+  }
+
+  async function getLayer(id) {
+    if (cache[id]) return cache[id];
+    const meta = INDEX.layers.find(l => l.id === id);
+    document.getElementById("loading").style.display = "block";
+    try { return (cache[id] = prepLayer(await loadJson(meta.file))); }
+    finally { document.getElementById("loading").style.display = "none"; }
+  }
+
+  // ---------------------------------------------------------
+  // ESTAT
+  // ---------------------------------------------------------
+  const startId = INDEX.layers.some(l => l.id === params.get("capa")) ? params.get("capa") : INDEX.layers[0].id;
+  let layer, frame = 0;
+  try { layer = await getLayer(startId); }
+  catch (e) { return fail(`No s'ha pogut carregar la capa ${startId} (${e.message}).`); }
+  // Comença a l'hora més propera a ara
+  const now = Date.now();
+  frame = layer.times.reduce((best, t, k) => Math.abs(t - now) < Math.abs(layer.times[best] - now) ? k : best, 0);
+  try { await loadFrame(layer, frame); }
+  catch (e) { return fail(`No s'ha pogut carregar el fotograma (${e.message}).`); }
+
+  document.getElementById("sub").textContent =
+    `Passada del ${INDEX.run.split("-").reverse().join("/")}${INDEX.run_hour ? ` · ${INDEX.run_hour} UTC` : ""}`;
+
+  // ---------------------------------------------------------
+  // MAPA
+  // ---------------------------------------------------------
+  const map = L.map("map", { zoomControl: false, minZoom: 4, maxZoom: 11, zoomSnap: 0.25, zoomDelta: 0.5 });
+  L.control.zoom({ position: "bottomright" }).addTo(map);
+  L.tileLayer("https://server.arcgisonline.com/ArcGIS/rest/services/World_Shaded_Relief/MapServer/tile/{z}/{y}/{x}", {
+    maxNativeZoom: 13, attribution: "Relleu © Esri"
+  }).addTo(map);
+
+  function fitPad() {
+    const narrow = window.innerWidth <= 600;
+    const panel = document.querySelector(".panel").getBoundingClientRect();
+    const legend = document.getElementById("legend").getBoundingClientRect();
+    return narrow
+      ? { paddingTopLeft: [0, panel.bottom], paddingBottomRight: [legend.width + 12, 0] }
+      : { paddingTopLeft: [panel.right + 8, 0], paddingBottomRight: [legend.width + 20, 0] };
+  }
+  const full = [[layer.south, layer.west], [layer.north, layer.east]];
+  const vp = params.get("vista");
+  if (vp === "tot" || (!vp && !VISTA_INICIAL)) map.fitBounds(full, fitPad());
+  else {
+    const v = vp ? vp.split(",").map(Number) : VISTA_INICIAL;
+    if (v && v.length === 4 && v.every(Number.isFinite)) map.fitBounds([[v[2], v[0]], [v[3], v[1]]], fitPad());
+    else map.fitBounds(full, fitPad());
+  }
+  map.setMaxBounds(L.latLngBounds(full).pad(0.3));
+
+  // Capa de colors (reprojecció fila a fila a Mercator) + fletxes, en dos canvas
+  const CanvasLayer = L.Layer.extend({
+    initialize(cls, draw) { this._cls = cls; this._draw = draw; },
+    onAdd(m) {
+      this._c = L.DomUtil.create("canvas", this._cls);
+      m.getPanes().overlayPane.appendChild(this._c);
+      m.on("moveend zoomend resize viewreset", this.redraw, this);
+      m.on("zoomstart", () => { this._c.style.visibility = "hidden"; });
+      this.redraw();
+    },
+    onRemove(m) { this._c.remove(); m.off("moveend zoomend resize viewreset", this.redraw, this); },
+    redraw() {
+      if (!this._map) return;
+      const m = this._map, size = m.getSize(), c = this._c;
+      L.DomUtil.setPosition(c, m.containerPointToLayerPoint([0, 0]));
+      c.width = size.x; c.height = size.y; c.style.visibility = "visible";
+      this._draw(m, c.getContext("2d"), size);
+    }
+  });
+
+  // El camp es calcula per a cada píxel de pantalla (interpolació bilineal): suau a qualsevol zoom
+  const off = document.createElement("canvas");
+  function drawField(m, ctx, size) {
+    const fd = frameData();
+    if (!fd) return;
+    if (layer.isClouds) return drawClouds(m, ctx, size, fd);
+    const Ly = layer, vals = fd.smooth || fd.vals, R = PIXEL, tb = Ly.tb;
+    const f = BICUBICA ? interpCubic : interp;
+    const t0 = tb !== null ? tb * (1 - VORA_SUAU) : null, dt = tb !== null ? tb - t0 : 0;
+    const grad = !!DEGRADAT_CAPA[Ly.layer];
+    const W = Math.ceil(size.x / R), H = Math.ceil(size.y / R);
+    off.width = W; off.height = H;
+    const octx = off.getContext("2d"), img = octx.createImageData(W, H), data = img.data;
+    // Longitud lineal en x (Mercator): índex fraccionari de columna per a cada x
+    const lonL = m.containerPointToLatLng([0, 0]).lng, lonR = m.containerPointToLatLng([size.x, 0]).lng;
+    const fjs = new Float64Array(W);
+    for (let x = 0; x < W; x++) fjs[x] = (lonL + (x * R + R / 2) / size.x * (lonR - lonL) - Ly.lon0) / Ly.dlon;
+    for (let y = 0; y < H; y++) {
+      const fi = (m.containerPointToLatLng([0, y * R + R / 2]).lat - Ly.lat0) / Ly.dlat;
+      if (fi < -0.5 || fi > Ly.nlat - 0.5) continue;
+      for (let x = 0; x < W; x++) {
+        const fj = fjs[x];
+        if (fj < -0.5 || fj > Ly.nlon - 0.5) continue;
+        const v = f(Ly, vals, fi, fj);
+        if (v !== v) continue;
+        let a = 255;
+        if (tb !== null && v < tb) {
+          if (v <= t0 || dt <= 0) continue;
+          a = 255 * (v - t0) / dt;                          // vora que s'esvaeix
+        }
+        const p = (y * W + x) * 4, b = Ly.binOf(v), col = Ly.rgb[b];
+        if (grad && b < Ly.NB - 1) {
+          const t = Math.min(1, Math.max(0, (v - Ly.thr[b]) / (Ly.thr[b + 1] - Ly.thr[b]))), c2 = Ly.rgb[b + 1];
+          data[p] = col[0] + (c2[0] - col[0]) * t; data[p + 1] = col[1] + (c2[1] - col[1]) * t; data[p + 2] = col[2] + (c2[2] - col[2]) * t;
+        } else { data[p] = col[0]; data[p + 1] = col[1]; data[p + 2] = col[2]; }
+        data[p + 3] = a;
+      }
+    }
+    octx.putImageData(img, 0, 0);
+    ctx.imageSmoothingEnabled = R > 1;
+    ctx.drawImage(off, 0, 0, W * R, H * R);
+  }
+
+  // Núvols: tres nivells amb gamma pròpia, superposats (alts a sota, baixos a sobre)
+  function drawClouds(m, ctx, size, fd) {
+    const Ly = layer, R = PIXEL, f = BICUBICA ? interpCubic : interp, cs = fd.c3s;
+    const W = Math.ceil(size.x / R), H = Math.ceil(size.y / R);
+    off.width = W; off.height = H;
+    const octx = off.getContext("2d"), img = octx.createImageData(W, H), data = img.data;
+    const lonL = m.containerPointToLatLng([0, 0]).lng, lonR = m.containerPointToLatLng([size.x, 0]).lng;
+    const fjs = new Float64Array(W);
+    for (let x = 0; x < W; x++) fjs[x] = (lonL + (x * R + R / 2) / size.x * (lonR - lonL) - Ly.lon0) / Ly.dlon;
+    for (let y = 0; y < H; y++) {
+      const fi = (m.containerPointToLatLng([0, y * R + R / 2]).lat - Ly.lat0) / Ly.dlat;
+      if (fi < -0.5 || fi > Ly.nlat - 0.5) continue;
+      for (let x = 0; x < W; x++) {
+        const fj = fjs[x];
+        if (fj < -0.5 || fj > Ly.nlon - 0.5) continue;
+        let r = 0, g = 0, b = 0, a = 0;
+        for (let k = 2; k >= 0; k--) {
+          const c = f(Ly, cs[k], fi, fj);
+          if (c !== c || c < Ly.minCover) continue;
+          const col = cloudRGBA(Ly, k, c), sa = col[3], na = sa + a * (1 - sa);
+          r = (col[0] * sa + r * a * (1 - sa)) / na;
+          g = (col[1] * sa + g * a * (1 - sa)) / na;
+          b = (col[2] * sa + b * a * (1 - sa)) / na;
+          a = na;
+        }
+        if (a <= 0) continue;
+        const p = (y * W + x) * 4;
+        data[p] = r; data[p + 1] = g; data[p + 2] = b; data[p + 3] = a * 255;
+      }
+    }
+    octx.putImageData(img, 0, 0);
+    ctx.imageSmoothingEnabled = R > 1;
+    ctx.drawImage(off, 0, 0, W * R, H * R);
+  }
+
+  // Fletxes de direcció. Amb 'phase' (segons) es mouen: avancen en la seva direcció,
+  // apareixen i s'esvaeixen, més de pressa on el valor és més alt.
+  const ARROW_MOVE = { amplitud: 16, cicle: 2.4 };      // px de recorregut · segons per cicle
+  const useBarbs = () => BARBES && layer.isSpeed && layer.hasDir;
+  function drawArrows(m, ctx, size, phase = null, force = false, sc = 1) {
+    if (!layer.hasDir) return;
+    if (!force && !document.getElementById("arrows-toggle").checked) return;
+    const fd = frameData();
+    if (!fd) return;
+    if (useBarbs()) return drawBarbs(m, ctx, size, fd, sc);
+    const A = layer, dirs = fd.dirs, vals = fd.vals;
+    const vmax = Math.max(A.max[frame] || 1, 1e-6);
+    // Aclarir segons el zoom: com a mínim ARROW_SPACING píxels entre fletxes
+    const p0 = m.latLngToContainerPoint([A.lat0, A.lon0]);
+    const p1 = m.latLngToContainerPoint([A.lat0 + A.dlat, A.lon0 + A.dlon]);
+    const step = Math.max(1, Math.ceil(ARROW_SPACING * sc / Math.max(1, Math.min(Math.abs(p1.x - p0.x), Math.abs(p1.y - p0.y)))));
+    const len = 12 * sc;
+    ctx.lineCap = "round"; ctx.lineJoin = "round";
+    for (let i = 0; i < A.nlat; i += step) {
+      const y0 = m.latLngToContainerPoint([A.lat0 + i * A.dlat, A.lon0]).y;
+      if (y0 < -30 || y0 > size.y + 30) continue;
+      for (let j = 0; j < A.nlon; j += step) {
+        const k = i * A.nlon + j, d = dirs[k];
+        if (d < 0) continue;
+        const x0 = m.latLngToContainerPoint([A.lat0 + i * A.dlat, A.lon0 + j * A.dlon]).x;
+        if (x0 < -30 || x0 > size.x + 30) continue;
+        const r = d * Math.PI / 180, dx = Math.sin(r), dy = -Math.cos(r);   // brúixola → pantalla
+        let x = x0, y = y0, alpha = 1;
+        if (phase !== null) {
+          const v = vals[k], kv = v === v ? Math.min(1, v / vmax) : 0;
+          const seed = ((i * 73856093) ^ (j * 19349663)) >>> 0;
+          const sp = (0.45 + 0.85 * kv) / ARROW_MOVE.cicle;
+          const t = (phase * sp + (seed % 1000) / 1000) % 1;   // 0 → 1
+          const off = (t - 0.5) * ARROW_MOVE.amplitud * sc;
+          x += dx * off; y += dy * off;
+          alpha = Math.sin(Math.PI * t);
+        }
+        const xa = x - dx * len / 2, ya = y - dy * len / 2, xb = x + dx * len / 2, yb = y + dy * len / 2;
+        const hx = -dy, hy = dx;                                               // perpendicular
+        ctx.globalAlpha = alpha;
+        for (const [w, col] of [[3, "rgba(255,255,255,0.55)"], [1.3, "rgba(16,32,48,0.7)"]]) {
+          ctx.strokeStyle = col; ctx.lineWidth = w * sc;
+          ctx.beginPath();
+          ctx.moveTo(xa, ya); ctx.lineTo(xb, yb);
+          ctx.moveTo(xb - (dx * 5 - hx * 3.5) * sc, yb - (dy * 5 - hy * 3.5) * sc); ctx.lineTo(xb, yb);
+          ctx.lineTo(xb - (dx * 5 + hx * 3.5) * sc, yb - (dy * 5 + hy * 3.5) * sc);
+          ctx.stroke();
+        }
+      }
+    }
+    ctx.globalAlpha = 1;
+  }
+
+  // Barbes de vent (convenció sinòptica): el pal surt del punt cap a d'on ve el vent; les plomes van al
+  // costat dret del pal mirant cap a fora (hemisferi nord). Banderola = 50 kt, ploma = 10 kt, mitja = 5 kt.
+  // Menys de 2,5 kt: cercle (calma).
+  function drawBarbs(m, ctx, size, fd, sc) {
+    const A = layer, dirs = fd.dirs, vals = fd.vals, toKt = SPEED[A.units] / SPEED.kt;
+    const p0 = m.latLngToContainerPoint([A.lat0, A.lon0]);
+    const p1 = m.latLngToContainerPoint([A.lat0 + A.dlat, A.lon0 + A.dlon]);
+    const cell = Math.max(1, Math.min(Math.abs(p1.x - p0.x), Math.abs(p1.y - p0.y)));
+    const step = Math.max(1, Math.ceil(BARB_SPACING * sc / cell));
+    const L = BARB.pal * sc, B = BARB.ploma * sc, gap = BARB.separacio * sc, fw = BARB.banderola * sc;
+    const barbes = [];                                     // es calcula un cop i es dibuixa en dues passades (halo + traç)
+    for (let i = 0; i < A.nlat; i += step) {
+      const y0 = m.latLngToContainerPoint([A.lat0 + i * A.dlat, A.lon0]).y;
+      if (y0 < -L || y0 > size.y + L) continue;
+      for (let j = 0; j < A.nlon; j += step) {
+        const k = i * A.nlon + j, d = dirs[k], v = vals[k];
+        if (d < 0 || v !== v) continue;
+        const x0 = m.latLngToContainerPoint([A.lat0 + i * A.dlat, A.lon0 + j * A.dlon]).x;
+        if (x0 < -L || x0 > size.x + L) continue;
+        barbes.push([x0, y0, d, Math.round(v * toKt / 5) * 5]);
+      }
+    }
+    ctx.lineCap = "round"; ctx.lineJoin = "round";
+    for (const [w, col, fill] of [[3.2, "rgba(255,255,255,0.75)", "rgba(255,255,255,0.75)"], [1.35, "#15212e", "#15212e"]]) {
+      ctx.strokeStyle = col; ctx.fillStyle = fill; ctx.lineWidth = w * sc;
+      for (const [x0, y0, d, kt] of barbes) {
+        if (kt < 5) {                                      // calma
+          ctx.beginPath(); ctx.arc(x0, y0, 3 * sc, 0, 2 * Math.PI); ctx.stroke();
+          continue;
+        }
+        const r = (d + 180) * Math.PI / 180;               // 'dirs' és cap on va: el pal apunta d'on ve
+        const ux = Math.sin(r), uy = -Math.cos(r);          // brúixola → pantalla
+        const px = -uy, py = ux;                            // costat de les plomes (en sentit horari)
+        let n = kt;
+        const flags = Math.floor(n / 50); n -= flags * 50;
+        const full = Math.floor(n / 10), half = n % 10 >= 5;
+        const llarg = Math.max(L, flags * (fw + gap * 0.5) + (full + (half ? 1 : 0)) * gap + 6 * sc);
+        const tx = x0 + ux * llarg, ty = y0 + uy * llarg;
+        ctx.beginPath(); ctx.moveTo(x0, y0); ctx.lineTo(tx, ty);
+        let pos = 0;
+        const flagPaths = [];
+        for (let f = 0; f < flags; f++) {
+          const ax = tx - ux * pos, ay = ty - uy * pos, bx = tx - ux * (pos + fw), by = ty - uy * (pos + fw);
+          flagPaths.push([ax, ay, ax + px * B, ay + py * B, bx, by]);
+          pos += fw + gap * 0.5;
+        }
+        for (let f = 0; f < full; f++) {
+          const sx = tx - ux * pos, sy = ty - uy * pos;
+          ctx.moveTo(sx, sy); ctx.lineTo(sx + px * B + ux * B * 0.4, sy + py * B + uy * B * 0.4);
+          pos += gap;
+        }
+        if (half) {
+          if (!flags && !full) pos += gap;                 // mitja ploma sola: una mica separada de la punta
+          const sx = tx - ux * pos, sy = ty - uy * pos, h = 0.55;
+          ctx.moveTo(sx, sy); ctx.lineTo(sx + (px * B + ux * B * 0.4) * h, sy + (py * B + uy * B * 0.4) * h);
+        }
+        ctx.stroke();
+        for (const [ax, ay, cx, cy, bx, by] of flagPaths) {
+          ctx.beginPath(); ctx.moveTo(ax, ay); ctx.lineTo(cx, cy); ctx.lineTo(bx, by); ctx.closePath();
+          ctx.fill(); ctx.stroke();
+        }
+      }
+    }
+  }
+
+  const fieldLayer = new CanvasLayer("field-canvas", drawField).addTo(map);
+
+  // Costa i fronteres (costa.geojson generat per arome_visor.py) i noms de llocs, damunt del camp
+  map.createPane("costa"); map.getPane("costa").style.zIndex = 450; map.getPane("costa").style.pointerEvents = "none";
+  map.createPane("noms");  map.getPane("noms").style.zIndex = 460;  map.getPane("noms").style.pointerEvents = "none";
+  let COSTA = null;
+  if (INDEX.coast) {
+    loadJson(`${INDEX.coast}?v=${INDEX.generated}`).then(g => {
+      COSTA = g;
+      for (const k of [0, 1]) L.geoJSON(g, { pane: "costa", interactive: false,
+        style: ft => (ESTIL_COSTA[ft.properties.tipus] || ESTIL_COSTA.costa)[k] }).addTo(map);
+    }).catch(e => console.warn("Sense costa:", e.message));
+  }
+  if (NOMS_LLOCS) {
+    const noms = CIUTATS.map(([nom, la, lo, niv]) => ({ niv, m: L.marker([la, lo], { pane: "noms", interactive: false, keyboard: false,
+      icon: L.divIcon({ className: "nom-lloc", html: `<i></i><span>${nom}</span>`, iconSize: null, iconAnchor: [3, 3] }) }) }));
+    const syncNoms = () => noms.forEach(({ niv, m }) => {
+      const on = niv === 1 || map.getZoom() >= ZOOM_NIVELL2;
+      if (on && !map.hasLayer(m)) m.addTo(map); else if (!on && map.hasLayer(m)) m.remove();
+    });
+    map.on("zoomend", syncNoms); syncNoms();
+  }
+  // Costa a la imatge exportada (mateix estil, escalat a la mida de sortida)
+  function drawCoast(m, ctx, sc) {
+    if (!COSTA) return;
+    ctx.lineCap = "round"; ctx.lineJoin = "round";
+    for (const k of [0, 1]) for (const ft of COSTA.features) {
+      const st = (ESTIL_COSTA[ft.properties.tipus] || ESTIL_COSTA.costa)[k];
+      const g = ft.geometry, lines = g.type === "LineString" ? [g.coordinates] : g.coordinates;
+      ctx.strokeStyle = st.color; ctx.globalAlpha = st.opacity; ctx.lineWidth = st.weight * sc;
+      ctx.setLineDash(st.dashArray ? st.dashArray.split(" ").map(x => x * sc) : []);
+      ctx.beginPath();
+      for (const line of lines) line.forEach(([lo, la], i) => {
+        const pt = m.latLngToContainerPoint([la, lo]);
+        i ? ctx.lineTo(pt.x, pt.y) : ctx.moveTo(pt.x, pt.y);
+      });
+      ctx.stroke();
+    }
+    ctx.setLineDash([]); ctx.globalAlpha = 1;
+    if (!NOMS_LLOCS) return;
+    ctx.font = `600 ${Math.round(12 * sc)}px "Barlow Semi Condensed", Arial, sans-serif`; ctx.textBaseline = "middle";
+    const zoom = m.getZoom(), size = m.getSize();
+    for (const [nom, la, lo, niv] of CIUTATS) {
+      if (niv === 2 && zoom < ZOOM_NIVELL2) continue;
+      const pt = m.latLngToContainerPoint([la, lo]);
+      if (pt.x < 0 || pt.y < 0 || pt.x > size.x || pt.y > size.y) continue;
+      ctx.fillStyle = "#17222d"; ctx.beginPath(); ctx.arc(pt.x, pt.y, 2.6 * sc, 0, 2 * Math.PI); ctx.fill();
+      ctx.lineWidth = 3 * sc; ctx.strokeStyle = "rgba(255,255,255,0.85)"; ctx.lineJoin = "round";
+      ctx.strokeText(nom, pt.x + 6 * sc, pt.y - 1 * sc); ctx.fillText(nom, pt.x + 6 * sc, pt.y - 1 * sc);
+    }
+  }
+  const arrowsMoving = () => !useBarbs() && document.getElementById("arrows-toggle").checked &&
+    document.getElementById("flow-toggle").checked && !window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+  const arrowLayer = new CanvasLayer("arrow-canvas",
+    (m, ctx, size) => drawArrows(m, ctx, size, arrowsMoving() ? performance.now() / 1000 : null)).addTo(map);
+
+  // Bucle de moviment de les fletxes (~30 fps); s'atura mentre es mou el mapa
+  let arrowRaf = null, mapMoving = false, lastArrow = 0;
+  function arrowLoop(ts) {
+    arrowRaf = null;
+    if (!arrowsMoving()) { arrowLayer.redraw(); return; }
+    if (!mapMoving && ts - lastArrow > 33 && arrowLayer._c) {
+      lastArrow = ts;
+      const c = arrowLayer._c, ctx = c.getContext("2d");
+      ctx.clearRect(0, 0, c.width, c.height);
+      drawArrows(map, ctx, map.getSize(), ts / 1000);
+    }
+    arrowRaf = requestAnimationFrame(arrowLoop);
+  }
+  function syncArrows() {
+    arrowLayer.redraw();
+    if (arrowsMoving() && !arrowRaf) arrowRaf = requestAnimationFrame(arrowLoop);
+  }
+  map.on("movestart zoomstart", () => { mapMoving = true; });
+  map.on("moveend zoomend", () => { mapMoving = false; });
+  document.getElementById("arrows-toggle").addEventListener("change", syncArrows);
+  document.getElementById("flow-toggle").addEventListener("change", syncArrows);
+
+  // ---------------------------------------------------------
+  // ANIMACIÓ DEL MOVIMENT (partícules amb rastre)
+  // ---------------------------------------------------------
+  const flowToggle = document.getElementById("flow-toggle");
+  if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) flowToggle.checked = false;
+
+  const FlowLayer = L.Layer.extend({
+    onAdd(m) {
+      this._c = L.DomUtil.create("canvas", "flow-canvas");
+      m.getPanes().overlayPane.appendChild(this._c);
+      this._ctx = this._c.getContext("2d");
+      this._p = [];
+      m.on("movestart zoomstart", this.stop, this);
+      m.on("moveend resize", this.reset, this);
+      this.reset();
+    },
+    onRemove(m) {
+      this.stop(); this._c.remove();
+      m.off("movestart zoomstart", this.stop, this); m.off("moveend resize", this.reset, this);
+    },
+    stop() {
+      if (this._raf) cancelAnimationFrame(this._raf);
+      this._raf = null;
+      if (this._c) this._c.style.visibility = "hidden";
+    },
+    // Recalcula la geometria de pantalla i torna a sembrar partícules
+    reset() {
+      this.stop();
+      if (!flowToggle.checked || !layer.anim) { this._ctx.clearRect(0, 0, this._c.width, this._c.height); return; }
+      const m = this._map, size = m.getSize(), c = this._c;
+      L.DomUtil.setPosition(c, m.containerPointToLayerPoint([0, 0]));
+      c.width = size.x; c.height = size.y; c.style.visibility = "visible";
+      this._w = size.x; this._h = size.y;
+      // Mercator: longitud lineal en x; latitud precalculada per a cada fila de píxels
+      this._lonL = m.containerPointToLatLng([0, 0]).lng;
+      this._kx = (m.containerPointToLatLng([size.x, 0]).lng - this._lonL) / size.x;
+      this._lat = new Float64Array(size.y);
+      for (let y = 0; y < size.y; y++) this._lat[y] = m.containerPointToLatLng([0, y]).lat;
+      // Corrent → partícules amb rastre; onades → crestes
+      this._mode = layer.anim === "ones" ? "ones" : "flux";
+      this._cfg = this._mode === "ones" ? ONES : FLOW;
+      this._ctx.clearRect(0, 0, size.x, size.y);
+      const n = Math.round(size.x * size.y / this._cfg.densitat);
+      this._p = Array.from({ length: n }, () => this.spawn({}, true));
+      this._raf = requestAnimationFrame(() => this.step());
+    },
+    // Índexs de malla d'un punt de pantalla
+    cell(x, y) {
+      const yi = y | 0;
+      if (yi < 0 || yi >= this._h) return null;
+      return {
+        fi: (this._lat[yi] - layer.lat0) / layer.dlat,
+        fj: (this._lonL + x * this._kx - layer.lon0) / layer.dlon,
+      };
+    },
+    spawn(p, randomAge) {
+      const fd = frameData();
+      for (let t = 0; t < 12; t++) {               // busca un punt de mar
+        p.x = Math.random() * this._w; p.y = Math.random() * this._h;
+        const c = this.cell(p.x, p.y);
+        if (fd && c && interp(layer, fd.vals, c.fi, c.fj) === interp(layer, fd.vals, c.fi, c.fj)) break;
+      }
+      const cfg = this._cfg;
+      p.life = cfg.vidaMin + Math.random() * (cfg.vidaMax - cfg.vidaMin);
+      p.age = randomAge ? Math.random() * p.life : 0;
+      return p;
+    },
+    step() {
+      const fd = frameData(), ctx = this._ctx, Ly = layer;
+      if (!fd) { this._raf = requestAnimationFrame(() => this.step()); return; }
+      if (this._mode === "ones") { this.stepOnes(fd); this._raf = requestAnimationFrame(() => this.step()); return; }
+      // Esvair el rastre anterior
+      ctx.globalCompositeOperation = "destination-in";
+      ctx.fillStyle = `rgba(0,0,0,${FLOW.esvaiment})`;
+      ctx.fillRect(0, 0, this._w, this._h);
+      ctx.globalCompositeOperation = "source-over";
+      ctx.strokeStyle = FLOW.color; ctx.lineWidth = FLOW.gruix; ctx.lineCap = "round";
+      // Escala de velocitat: valor del punt respecte al màxim del fotograma
+      const vmax = Math.max(Ly.max[frame] || 1, 1e-6);
+      ctx.beginPath();
+      for (const p of this._p) {
+        const c = this.cell(p.x, p.y);
+        const v = c ? interp(Ly, fd.vals, c.fi, c.fj) : NaN;
+        const i = c ? Math.round(c.fi) : -1, j = c ? Math.round(c.fj) : -1;
+        const d = (i >= 0 && i < Ly.nlat && j >= 0 && j < Ly.nlon) ? fd.dirs[i * Ly.nlon + j] : -1;
+        if (v !== v || d < 0 || ++p.age > p.life) { this.spawn(p, false); continue; }
+        const r = d * Math.PI / 180;
+        const sp = FLOW.velMin + (FLOW.velMax - FLOW.velMin) * Math.min(1, v / vmax);
+        const nx = p.x + Math.sin(r) * sp, ny = p.y - Math.cos(r) * sp;
+        if (nx < 0 || nx >= this._w || ny < 0 || ny >= this._h) { this.spawn(p, false); continue; }
+        ctx.moveTo(p.x, p.y); ctx.lineTo(nx, ny);
+        p.x = nx; p.y = ny;
+      }
+      ctx.stroke();
+      this._raf = requestAnimationFrame(() => this.step());
+    },
+    // Crestes d'onada: segment corbat perpendicular a la propagació, que avança i s'esvaeix
+    stepOnes(fd) {
+      const ctx = this._ctx, Ly = layer, C = ONES;
+      ctx.clearRect(0, 0, this._w, this._h);
+      ctx.strokeStyle = C.color; ctx.lineWidth = C.gruix; ctx.lineCap = "round";
+      const vmax = Math.max(Ly.max[frame] || 1, 1e-6);
+      for (const p of this._p) {
+        const c = this.cell(p.x, p.y);
+        const v = c ? interp(Ly, fd.vals, c.fi, c.fj) : NaN;
+        const i = c ? Math.round(c.fi) : -1, j = c ? Math.round(c.fj) : -1;
+        const d = (i >= 0 && i < Ly.nlat && j >= 0 && j < Ly.nlon) ? fd.dirs[i * Ly.nlon + j] : -1;
+        if (v !== v || d < 0 || ++p.age > p.life) { this.spawn(p, false); continue; }
+        const k = Math.min(1, v / vmax);
+        const r = d * Math.PI / 180;
+        const ux = Math.sin(r), uy = -Math.cos(r);        // cap on avança (pantalla)
+        const px = -uy, py = ux;                          // al llarg de la cresta
+        const sp = C.velMin + (C.velMax - C.velMin) * k;
+        p.x += ux * sp; p.y += uy * sp;
+        if (p.x < 0 || p.x >= this._w || p.y < 0 || p.y >= this._h) { this.spawn(p, false); continue; }
+        const half = (C.llargMin + (C.llargMax - C.llargMin) * k) / 2;
+        const bulge = half * 2 * C.corba;
+        ctx.globalAlpha = C.alfa * Math.sin(Math.PI * p.age / p.life);   // apareix i s'esvaeix
+        ctx.beginPath();
+        ctx.moveTo(p.x - px * half - ux * bulge, p.y - py * half - uy * bulge);
+        ctx.quadraticCurveTo(p.x + ux * bulge, p.y + uy * bulge,
+                             p.x + px * half - ux * bulge, p.y + py * half - uy * bulge);
+        ctx.stroke();
+      }
+      ctx.globalAlpha = 1;
+    },
+  });
+  const flowLayer = new FlowLayer().addTo(map);
+  flowToggle.addEventListener("change", () => flowLayer.reset());
+
+  // ---------------------------------------------------------
+  // PANELL: capes, temps, llegenda
+  // ---------------------------------------------------------
+  const layersEl = document.getElementById("layers");
+  for (const l of INDEX.layers) {
+    const b = document.createElement("button");
+    b.type = "button"; b.dataset.id = l.id; b.textContent = l.label;
+    b.addEventListener("click", () => setLayer(l.id));
+    layersEl.appendChild(b);
+  }
+  const unitsEl = document.getElementById("units"), unitsSeg = document.getElementById("units-seg");
+  for (const u of UNITATS_VENT) {
+    const b = document.createElement("button");
+    b.type = "button"; b.dataset.u = u; b.textContent = u;
+    b.title = u === "kt" ? "Nusos" : u === "km/h" ? "Quilòmetres per hora" : u;
+    b.addEventListener("click", () => setUnits(u));
+    unitsSeg.appendChild(b);
+  }
+  function setUnits(u) {
+    if (!UNITATS_VENT.includes(u) || u === layer.units) return;
+    unitatVent = u;
+    desaPref("visor_unitats_vent", u);
+    for (const Ly of Object.values(cache)) if (Ly && Ly.isSpeed) applyUnits(Ly, u);
+    const url = new URL(location); url.searchParams.set("unitats", u); history.replaceState(null, "", url);
+    map.closePopup();
+    renderAll();
+  }
+  const slider = document.getElementById("slider");
+  const whenEl = document.getElementById("when"), whenUtc = document.getElementById("when-utc");
+  const fmtLocal = new Intl.DateTimeFormat("ca-ES", { timeZone: TZ, weekday: "long", day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" });
+  const fmtUtc = d => `${d.toISOString().slice(0, 16).replace("T", " ")} UTC`;
+
+  function renderTime() {
+    const t = layer.times[frame];
+    whenEl.textContent = fmtLocal.format(t).replace(/^./, c => c.toUpperCase()) + " h";
+    const lead = Math.round((t - layer.times[0]) / 3.6e6);
+    whenUtc.textContent = `${fmtUtc(t)}  ·  +${lead} h`;
+    slider.value = frame;
+    const mx = layer.max[frame], mn = layer.min ? layer.min[frame] : null, F = FORMAT[layer.units];
+    document.getElementById("maxline").innerHTML = layer.isClouds || mx == null ? "" : mn != null
+      ? `A tota la zona: màx <b>${F.short(mx)}</b> · mín <b>${F.short(mn)}</b>`
+      : `Màxim a tota la zona: <b>${F.short(mx).replace(/ \(.*\)$/, "")}</b>`;
+  }
+
+  // Etiquetes "rodones" de la llegenda: en metres, enters a partir d'1 m i mitjos per sota
+  function showTick(Ly, t, k) {
+    const n = Ly.NB;
+    return k === 0 || k === n ||
+      (Ly.units === "m" ? (t >= 1 ? Number.isInteger(t) : (t * 2) % 1 === 0) : n <= 13 || k % 2 === 0);
+  }
+  function renderLegend() {
+    const lg = document.getElementById("legend"), bar = document.getElementById("legend-bar");
+    lg.querySelectorAll(".tick, .tri-bar, .tri-lab").forEach(t => t.remove());
+    lg.classList.toggle("tri", layer.isClouds);
+    bar.style.display = layer.isClouds ? "none" : "";
+    document.getElementById("legend-marker").style.display = "none";
+    if (layer.isClouds) {
+      layer.D.ramps.forEach((r, k) => {
+        const b = document.createElement("div"), x = 8 + k * 18;
+        b.className = "tri-bar"; b.style.left = `${x}px`;
+        b.style.backgroundImage = `linear-gradient(to top, ${[0, layer.minCover - 0.01, layer.minCover, 25, 50, 75, 100]
+          .map(c => `${cloudCss(layer, k, c)} ${c}%`).join(",")})`;
+        b.title = r.label;
+        lg.appendChild(b);
+        const l = document.createElement("div");
+        l.className = "tri-lab"; l.style.left = `${x}px`; l.textContent = r.label[0];
+        lg.appendChild(l);
+      });
+      [0, 25, 50, 75, 100].forEach(t => {
+        const el = document.createElement("div");
+        el.className = "tick"; el.style.left = "64px";
+        el.style.bottom = `calc(10px + (100% - 20px) * ${t / 100})`;
+        el.textContent = t;
+        lg.appendChild(el);
+      });
+      document.getElementById("legend-unit").textContent = "";
+      return;
+    }
+    const n = layer.NB;
+    bar.style.background = `linear-gradient(to top, ${layer.colors.map((c, k) => `${c} ${k / n * 100}% ${(k + 1) / n * 100}%`).join(",")})`;
+    layer.thr.forEach((t, k) => {
+      if (!showTick(layer, t, k)) return;
+      const el = document.createElement("div");
+      el.className = "tick";
+      el.style.bottom = `calc(10px + (100% - 20px) * ${k / n})`;
+      el.textContent = FORMAT[layer.units].tick(t);
+      lg.appendChild(el);
+    });
+    document.getElementById("legend-unit").textContent = layer.units;
+    document.getElementById("legend-marker").style.display = "none";
+  }
+
+  function renderAll() {
+    if (typeof DL !== "undefined" && !DL.panel.hidden && !DL.busy) fillHours();
+    document.querySelectorAll("#layers button").forEach(b => b.setAttribute("aria-pressed", String(b.dataset.id === layer.layer)));
+    slider.max = layer.times.length - 1;
+    document.getElementById("credit").textContent = `Font: ${layer.source}  ·  @enricagud`;
+    for (const id of ["flow-lab", "arrows-lab", "dl-arrows-lab"])
+      document.getElementById(id).style.display = (id === "flow-lab" ? layer.anim : layer.hasDir) ? "" : "none";
+    document.getElementById("arrows-txt").textContent = useBarbs() ? "Mostra barbes de vent" : "Mostra fletxes de direcció";
+    document.getElementById("dl-arrows-txt").textContent = useBarbs() ? "Barbes de vent" : "Fletxes de direcció";
+    unitsEl.hidden = !layer.isSpeed;
+    unitsSeg.querySelectorAll("button").forEach(b => b.setAttribute("aria-pressed", String(b.dataset.u === layer.units)));
+    renderLegend(); renderTime();
+    fieldLayer.redraw(); arrowLayer.redraw();
+    if (lastLL) show(lastLL, lastPt);
+    ensureFrame(frame);
+    if (typeof flowLayer !== "undefined") flowLayer.reset();
+  }
+
+  async function setLayer(id) {
+    if (layer && id === layer.layer) return;
+    const t = layer.times[frame];
+    let next;
+    try { next = await getLayer(id); } catch (e) { return alert(`No s'ha pogut carregar la capa (${e.message})`); }
+    // mateixa hora (o la més propera) a la capa nova
+    const k = next.times.reduce((b, tt, i) => Math.abs(tt - t) < Math.abs(next.times[b] - t) ? i : b, 0);
+    document.getElementById("loading").style.display = "block";
+    try { await loadFrame(next, k); }
+    catch (e) { return alert(`No s'ha pogut carregar la capa (${e.message})`); }
+    finally { document.getElementById("loading").style.display = "none"; }
+    layer = next; frame = k;
+    map.closePopup();
+    const url = new URL(location); url.searchParams.set("capa", id); history.replaceState(null, "", url);
+    renderAll();
+  }
+
+  function setFrame(k) {
+    frame = (k + layer.times.length) % layer.times.length;
+    renderTime();
+    if (typeof chartNow === "function") chartNow();
+    if (layer.data.has(frame)) { fieldLayer.redraw(); arrowLayer.redraw(); if (lastLL) show(lastLL, lastPt); }
+    ensureFrame(frame);
+  }
+  slider.addEventListener("input", () => setFrame(+slider.value));
+
+  // Reproducció
+  const playBtn = document.getElementById("play");
+  let timer = null;
+  function setPlaying(on) {
+    if (on && !timer) timer = setInterval(() => setFrame(frame + 1), VELOCITAT_MS);
+    if (!on && timer) { clearInterval(timer); timer = null; }
+    playBtn.textContent = timer ? "❚❚" : "▶";
+    playBtn.setAttribute("aria-label", timer ? "Atura" : "Reprodueix");
+  }
+  playBtn.addEventListener("click", () => setPlaying(!timer));
+  document.addEventListener("keydown", e => {
+    if (e.target.tagName === "INPUT" && e.target.type !== "range") return;
+    if (e.key === "ArrowRight") { setPlaying(false); setFrame(frame + 1); }
+    if (e.key === "ArrowLeft")  { setPlaying(false); setFrame(frame - 1); }
+    if (e.key === " ") { e.preventDefault(); setPlaying(!timer); }
+  });
+
+  // ---------------------------------------------------------
+  // CONSULTA DE VALORS
+  // ---------------------------------------------------------
+  const valueEl = document.getElementById("value"), swatch = document.getElementById("swatch");
+  const secondEl = document.getElementById("second"), coordsEl = document.getElementById("coords");
+  const tip = document.getElementById("tip"), marker = document.getElementById("legend-marker");
+  let lastLL = null, lastPt = null;
+
+  function sample(ll) {
+    const i = Math.round((ll.lat - layer.lat0) / layer.dlat), j = Math.round((ll.lng - layer.lon0) / layer.dlon);
+    if (i < 0 || i >= layer.nlat || j < 0 || j >= layer.nlon) return { v: undefined };
+    const fd = frameData();
+    if (!fd) return { v: undefined };
+    if (layer.isClouds) {
+      const fi = (ll.lat - layer.lat0) / layer.dlat, fj = (ll.lng - layer.lon0) / layer.dlon;
+      const c3 = fd.c3.map(a => interp(layer, a, fi, fj));
+      return c3.some(c => c !== c) ? { v: null } : { v: Math.max(...c3), c3 };
+    }
+    const vi = interp(layer, fd.vals, (ll.lat - layer.lat0) / layer.dlat, (ll.lng - layer.lon0) / layer.dlon);
+    if (vi !== vi) return { v: null };
+    const d = fd.dirs[i * layer.nlon + j];
+    return { v: vi, d: d >= 0 ? d : null };
+  }
+  const coordText = ll => `${fmt(Math.abs(ll.lat), 2)}° ${ll.lat >= 0 ? "N" : "S"}   ${fmt(Math.abs(ll.lng), 2)}° ${ll.lng >= 0 ? "E" : "O"}`;
+
+  function show(ll, pt) {
+    lastLL = ll; lastPt = pt;
+    const s = sample(ll), F = FORMAT[layer.units];
+    coordsEl.textContent = coordText(ll);
+    if (s.v === undefined || s.v === null) {
+      valueEl.className = "value empty";
+      valueEl.textContent = s.v === null ? "Sense dada" : "Fora de la zona";
+      swatch.style.background = "transparent"; secondEl.textContent = "";
+      tip.style.display = "none"; marker.style.display = "none";
+      return;
+    }
+    if (layer.isClouds) {
+      valueEl.className = "value";
+      valueEl.innerHTML = `<div class="tri-read">${layer.D.ramps.map((r, k) =>
+        `<div style="border-color:${r.a}"><b>${Math.round(s.c3[k])}<small>%</small></b><span>${r.label}</span></div>`).join("")}</div>`;
+      swatch.style.display = "none"; secondEl.textContent = ""; marker.style.display = "none";
+      if (pt) {
+        tip.textContent = s.c3.map((c, k) => `${layer.D.ramps[k].label[0]} ${Math.round(c)}`).join(" · ") + " %";
+        tip.style.left = pt.x + "px"; tip.style.top = pt.y + "px"; tip.style.display = "block";
+      }
+      return;
+    }
+    swatch.style.display = "";
+    const below = layer.tb !== null && s.v < layer.tb;
+    if (below && layer.zero_text) {
+      valueEl.className = "value empty"; valueEl.textContent = layer.zero_text;
+      swatch.style.background = "transparent"; secondEl.textContent = ""; marker.style.display = "none";
+      if (pt) { tip.textContent = layer.zero_text; tip.style.left = pt.x + "px"; tip.style.top = pt.y + "px"; tip.style.display = "block"; }
+      return;
+    }
+    valueEl.className = "value"; valueEl.innerHTML = F.big(s.v);
+    swatch.style.background = below ? "transparent" : layer.colorOf(s.v);
+    secondEl.textContent = [layer.units === "m/s" ? `${fmt(s.v * 1.94384, 1)} nusos`
+                            : layer.units === "km/h" ? `${Math.round(s.v / 1.852)} kt`
+                            : layer.units === "kt" ? `${Math.round(s.v * 1.852)} km/h` : "",
+                            s.d != null ? dirText(layer.dir_kind, s.d) : ""].filter(Boolean).join("  ·  ");
+    if (pt) {
+      tip.textContent = F.short(s.v).replace(/ \(.*\)$/, "");
+      tip.style.left = pt.x + "px"; tip.style.top = pt.y + "px"; tip.style.display = "block";
+    }
+    marker.style.bottom = `calc(10px + (100% - 20px) * ${(layer.binOf(s.v) + 0.5) / layer.NB})`;
+    marker.style.display = below ? "none" : "block";
+  }
+
+  map.on("mousemove", e => {
+    if (e.originalEvent && e.originalEvent.target.closest && e.originalEvent.target.closest(".leaflet-popup")) { tip.style.display = "none"; return; }
+    show(e.latlng, e.containerPoint);
+  });
+  map.on("mouseout", () => { tip.style.display = "none"; lastPt = null; });
+  // Línies de màxim i mínim de tota la previsió en el punt més proper de la malla
+  const fmtShort = new Intl.DateTimeFormat("ca-ES", { timeZone: TZ, weekday: "short", day: "numeric", hour: "2-digit", minute: "2-digit" });
+  function statsHtml(Ly, st, ll) {
+    if (!st) return "";
+    const i = Math.round((ll.lat - Ly.lat0) / Ly.dlat), j = Math.round((ll.lng - Ly.lon0) / Ly.dlon);
+    if (i < 0 || i >= Ly.nlat || j < 0 || j >= Ly.nlon) return "";
+    const k = i * Ly.nlon + j, F = FORMAT[Ly.units];
+    const vM = st.max.vals[k], vm = st.min.vals[k];
+    if (vM !== vM) return "";
+    const when = h => fmtShort.format(new Date(st.t0.getTime() + h * 3.6e6)) + " h";
+    return `<div class="pp-stats">
+        <div class="pp-line" style="margin:0 0 2px">En aquest punt, durant tota la previsió</div>
+        <div class="pp-mm"><span class="pp-mm-sw" style="background:${Ly.colorOf(vM)}"></span>Màx <b>${F.short(vM).replace(/ \(.*\)$/, "")}</b> · ${when(st.max.hrs[k])}</div>
+        <div class="pp-mm"><span class="pp-mm-sw" style="background:${Ly.colorOf(vm)}"></span>Mín <b>${F.short(vm).replace(/ \(.*\)$/, "")}</b> · ${when(st.min.hrs[k])}</div>
+      </div>`;
+  }
+
+  // ---------------------------------------------------------
+  // SÈRIE TEMPORAL EN UN PUNT (gràfica de la finestra del clic)
+  // Al primer clic d'una capa es llegeixen totes les hores en format compacte (sense suavitzar);
+  // després qualsevol clic és immediat.
+  // ---------------------------------------------------------
+  const CHART = { w: 300, h: 128, pl: 30, pr: 8, pt: 10, pb: 20 };
+  const decR = document.createElement("canvas");
+  async function decodeRaw(url, Ly) {
+    const r = await fetch(url);
+    if (!r.ok) throw new Error(`HTTP ${r.status} (${url})`);
+    const bmp = await createImageBitmap(await r.blob(), { premultiplyAlpha: "none", colorSpaceConversion: "none" });
+    decR.width = bmp.width; decR.height = bmp.height;
+    const ctx = decR.getContext("2d", { willReadFrequently: true });
+    ctx.clearRect(0, 0, bmp.width, bmp.height); ctx.drawImage(bmp, 0, 0);
+    const px = ctx.getImageData(0, 0, bmp.width, bmp.height).data, N = Ly.nlat * Ly.nlon;
+    if (Ly.isClouds) {                                     // 3 bytes per punt, 255 = sense dada
+      const c = new Uint8Array(N * 3);
+      for (let i = 0; i < Ly.nlat; i++) for (let j = 0; j < Ly.nlon; j++) {
+        const p = ((Ly.nlat - 1 - i) * Ly.nlon + j) * 4, k = (i * Ly.nlon + j) * 3;
+        if (px[p + 3] < 128) { c[k] = c[k + 1] = c[k + 2] = 255; } else { c[k] = px[p]; c[k + 1] = px[p + 1]; c[k + 2] = px[p + 2]; }
+      }
+      return { c };
+    }
+    const q = new Uint16Array(N), d = Ly.hasDir ? new Uint8Array(N) : null;
+    for (let i = 0; i < Ly.nlat; i++) for (let j = 0; j < Ly.nlon; j++) {
+      const p = ((Ly.nlat - 1 - i) * Ly.nlon + j) * 4, k = i * Ly.nlon + j;
+      q[k] = px[p + 3] < 128 ? 65535 : px[p] * 256 + px[p + 1];
+      if (d) d[k] = px[p + 2];
+    }
+    return { q, d };
+  }
+  const cubes = new Map();                                 // capa → promesa de totes les hores (màx. 2 capes)
+  function loadCube(Ly) {
+    if (cubes.has(Ly.layer)) return cubes.get(Ly.layer);
+    const T = Ly.frames.length, out = new Array(T);
+    let next = 0;
+    const worker = async () => { while (next < T) { const k = next++; out[k] = await decodeRaw(`${Ly.frames[k]}?v=${Ly.generated}`, Ly); } };
+    const pr = Promise.all(Array.from({ length: 6 }, worker)).then(() => out);
+    pr.catch(() => cubes.delete(Ly.layer));
+    cubes.set(Ly.layer, pr);
+    if (cubes.size > 2) cubes.delete(cubes.keys().next().value);
+    return pr;
+  }
+  // Valors de totes les hores en un punt (interpolació bilineal, ignorant punts sense dada)
+  function seriesAt(Ly, cube, ll) {
+    const fi = (ll.lat - Ly.lat0) / Ly.dlat, fj = (ll.lng - Ly.lon0) / Ly.dlon;
+    const i0 = Math.max(0, Math.min(Ly.nlat - 2, Math.floor(fi))), j0 = Math.max(0, Math.min(Ly.nlon - 2, Math.floor(fj)));
+    const t = Math.max(0, Math.min(1, fi - i0)), u = Math.max(0, Math.min(1, fj - j0));
+    const nb = [[i0, j0, (1 - t) * (1 - u)], [i0, j0 + 1, (1 - t) * u], [i0 + 1, j0, t * (1 - u)], [i0 + 1, j0 + 1, t * u]];
+    const kn = (Math.round(fi) * Ly.nlon + Math.round(fj));
+    const nL = Ly.isClouds ? 3 : 1, vals = Array.from({ length: nL }, () => new Float64Array(cube.length)), dirs = [];
+    cube.forEach((fr, h) => {
+      for (let c = 0; c < nL; c++) {
+        let acc = 0, ws = 0;
+        for (const [i, j, w] of nb) {
+          const k = i * Ly.nlon + j;
+          const raw = Ly.isClouds ? fr.c[k * 3 + c] : fr.q[k];
+          if (raw === (Ly.isClouds ? 255 : 65535) || w <= 0) continue;
+          acc += w * (Ly.isClouds ? raw : raw * Ly.scale + Ly.offset); ws += w;
+        }
+        vals[c][h] = ws >= 0.5 ? acc / ws : NaN;
+      }
+      if (fr.d) dirs[h] = Math.round(fr.d[kn] * 360 / 256);
+    });
+    return { vals, dirs };
+  }
+  // Escala "rodona" per a l'eix vertical
+  function niceScale(lo, hi, n = 4) {
+    if (!(hi > lo)) { hi = lo + 1; }
+    const raw = (hi - lo) / n, mag = Math.pow(10, Math.floor(Math.log10(raw)));
+    const step = [1, 2, 2.5, 5, 10].map(m => m * mag).find(st => st >= raw) || 10 * mag;
+    const a = Math.floor(lo / step) * step, b = Math.ceil(hi / step) * step;
+    const ticks = []; for (let v = a; v <= b + step * 1e-6; v += step) ticks.push(+v.toFixed(6));
+    return { min: a, max: b, ticks };
+  }
+  // Corba suau (Catmull-Rom → Bézier) que es talla on no hi ha dades
+  function smoothPath(pts) {
+    let d = "", seg = [];
+    const flush = () => {
+      if (seg.length === 1) d += `M${seg[0][0]},${seg[0][1]}h0.01`;
+      else if (seg.length > 1) {
+        d += `M${seg[0][0].toFixed(1)},${seg[0][1].toFixed(1)}`;
+        for (let i = 0; i < seg.length - 1; i++) {
+          const p0 = seg[i - 1] || seg[i], p1 = seg[i], p2 = seg[i + 1], p3 = seg[i + 2] || p2;
+          const c1 = [p1[0] + (p2[0] - p0[0]) / 6, p1[1] + (p2[1] - p0[1]) / 6];
+          const c2 = [p2[0] - (p3[0] - p1[0]) / 6, p2[1] - (p3[1] - p1[1]) / 6];
+          d += `C${c1[0].toFixed(1)},${c1[1].toFixed(1)} ${c2[0].toFixed(1)},${c2[1].toFixed(1)} ${p2[0].toFixed(1)},${p2[1].toFixed(1)}`;
+        }
+      }
+      seg = [];
+    };
+    for (const p of pts) { if (p[1] === p[1]) seg.push(p); else flush(); }
+    flush();
+    return d;
+  }
+  const fmtHour = new Intl.DateTimeFormat("ca-ES", { timeZone: TZ, hour: "2-digit", hourCycle: "h23" });
+  const fmtDay = new Intl.DateTimeFormat("ca-ES", { timeZone: TZ, weekday: "short", day: "numeric" });
+  let gid = 0;
+
+  // Dibuixa la gràfica (SVG) i en retorna l'HTML; els esdeveniments s'enganxen a attachChart
+  function chartSvg(Ly, ser) {
+    const { w, h, pl, pr } = CHART, pt = CHART.pt + (Ly.hasDir ? 12 : 0), pb = CHART.pb;
+    const T = Ly.times.length, X = k => pl + (T > 1 ? k / (T - 1) : 0.5) * (w - pl - pr);
+    const kind = Ly.isClouds ? "nuvols" : ["precip", "neu"].includes(Ly.layer) ? "barres" : "linia";
+    const all = ser.vals.flatMap(a => Array.from(a)).filter(v => v === v);
+    if (!all.length) return `<div class="pp-chart-load">Sense dades en aquest punt</div>`;
+    let lo = Math.min(...all), hi = Math.max(...all);
+    if (kind === "nuvols") { lo = 0; hi = 100; }
+    else if (kind === "barres" || ["acum", "vent", "tcc"].includes(Ly.layer)) { lo = 0; hi = Math.max(hi, kind === "barres" ? 1 : Ly.layer === "vent" ? 10 : 1); }
+    else { const pad = Math.max(0.5, (hi - lo) * 0.12); lo -= pad; hi += pad; }
+    const sc = niceScale(lo, hi, kind === "nuvols" ? 4 : 3);
+    const Y = v => h - pb - (v - sc.min) / (sc.max - sc.min) * (h - pb - pt);
+    const id = `g${++gid}`, F = FORMAT[Ly.units];
+    let o = `<svg width="${w}" height="${h}" viewBox="0 0 ${w} ${h}" data-id="${id}" data-ymin="${sc.min}" data-ymax="${sc.max}">`;
+    // Quadrícula i eix vertical
+    for (const tv of sc.ticks) {
+      o += `<line class="grid" x1="${pl}" x2="${w - pr}" y1="${Y(tv).toFixed(1)}" y2="${Y(tv).toFixed(1)}"/>`;
+      o += `<text class="ax" x="${pl - 5}" y="${(Y(tv) + 3).toFixed(1)}" text-anchor="end">${F.tick(tv)}</text>`;
+    }
+    // Dies (mitjanit local) i hores 06 · 12 · 18
+    const h0 = +fmtHour.format(Ly.times[0]), firstDay = h0 >= 1 && h0 <= 17;   // nom del primer dia, si hi cap
+    if (firstDay) o += `<text class="day" x="${pl}" y="${h - pb + 13}">${fmtDay.format(Ly.times[0])}</text>`;
+    Ly.times.forEach((tm, k) => {
+      const hh = +fmtHour.format(tm), x = X(k).toFixed(1);
+      if (hh === 0) {
+        o += `<line class="mid" x1="${x}" x2="${x}" y1="${pt - 2}" y2="${h - pb + 3}"/>`;
+        o += `<text class="day" x="${x}" y="${h - pb + 13}" text-anchor="middle">${fmtDay.format(tm)}</text>`;
+      } else if (hh % 6 === 0 && !(firstDay && k < 7)) {
+        o += `<text class="ax" x="${x}" y="${h - pb + 12}" text-anchor="middle">${String(hh).padStart(2, "0")}</text>`;
+      }
+    });
+    // Degradat vertical amb la paleta de la capa
+    if (kind !== "nuvols") {
+      o += `<defs><linearGradient id="${id}" gradientUnits="userSpaceOnUse" x1="0" y1="${Y(sc.min)}" x2="0" y2="${Y(sc.max)}">`;
+      const span = sc.max - sc.min;
+      Ly.thr.slice(0, Ly.NB).forEach((tv, b) => {
+        const a = Math.max(0, Math.min(1, (tv - sc.min) / span)), z = Math.max(0, Math.min(1, ((Ly.thr[b + 1] ?? tv) - sc.min) / span));
+        o += `<stop offset="${a}" stop-color="${Ly.colors[b]}"/><stop offset="${z}" stop-color="${Ly.colors[b]}"/>`;
+      });
+      o += `</linearGradient></defs>`;
+    }
+    const v0 = ser.vals[0];
+    if (kind === "barres") {
+      const bw = Math.max(1.5, (w - pl - pr) / T * 0.72);
+      v0.forEach((v, k) => {
+        if (!(v >= (Ly.tb ?? 0)) || v <= 0) return;
+        const y = Y(v);
+        o += `<rect x="${(X(k) - bw / 2).toFixed(1)}" y="${y.toFixed(1)}" width="${bw.toFixed(1)}" height="${Math.max(0.8, h - pb - y).toFixed(1)}" rx="1" fill="${Ly.colorOf(v)}"/>`;
+      });
+    } else if (kind === "linia") {
+      const pts = Array.from(v0, (v, k) => [X(k), Y(v)]), line = smoothPath(pts);
+      const ok = pts.filter(p => p[1] === p[1]);
+      if (ok.length > 1) o += `<path d="${line}L${ok[ok.length - 1][0].toFixed(1)},${h - pb}L${ok[0][0].toFixed(1)},${h - pb}Z" fill="url(#${id})" opacity="0.2"/>`;
+      o += `<path d="${line}" fill="none" stroke="url(#${id})" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/>`;
+      o += `<path d="${line}" fill="none" stroke="rgba(16,32,48,0.25)" stroke-width="0.6"/>`;
+    } else {
+      Ly.D.ramps.slice().reverse().forEach((r, kk) => {
+        const c = 2 - kk, pts = Array.from(ser.vals[c], (v, k) => [X(k), Y(v)]), line = smoothPath(pts);
+        o += `<path d="${line}L${X(T - 1)},${h - pb}L${X(0)},${h - pb}Z" fill="${r.a}" opacity="0.10"/>`;
+        o += `<path d="${line}" fill="none" stroke="${r.a}" stroke-width="1.8" stroke-linejoin="round"/>`;
+      });
+    }
+    // Direcció del vent (cap on bufa), cada 3 hores
+    if (Ly.hasDir) ser.dirs.forEach((dg, k) => {
+      if (k % 3 || dg == null || !(v0[k] >= 3)) return;
+      o += `<path d="M0,4.5L0,-4.5M-2.6,-1.8L0,-4.5L2.6,-1.8" transform="translate(${X(k).toFixed(1)},${CHART.pt}) rotate(${dg})" fill="none" stroke="${Ly.colorOf(v0[k])}" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>`;
+    });
+    // Màxim (i mínim en temperatura)
+    if (kind !== "nuvols") {
+      const ks = [...v0.keys()].filter(k => v0[k] === v0[k]);
+      const kM = ks.reduce((a, b) => v0[b] > v0[a] ? b : a, ks[0]), km = ks.reduce((a, b) => v0[b] < v0[a] ? b : a, ks[0]);
+      const lab = (k, up) => {
+        const x = Math.max(pl + 14, Math.min(w - pr - 14, X(k))), y = Y(v0[k]);
+        return `<circle cx="${X(k).toFixed(1)}" cy="${y.toFixed(1)}" r="2.6" fill="var(--panel)" stroke="var(--ink)" stroke-width="1.2"/>` +
+               `<text class="ext" x="${x.toFixed(1)}" y="${(up ? y - 6 : y + 13).toFixed(1)}" text-anchor="middle">${["km/h", "kt", "%"].includes(Ly.units) ? Math.round(v0[k]) : fmt(v0[k], 1)}</text>`;
+      };
+      if (v0[kM] > (kind === "barres" ? (Ly.tb ?? 0) : -Infinity)) o += lab(kM, true);
+      if (Ly.layer === "temp") o += lab(km, false);
+    }
+    // Hora actual del visor i capa de resposta al ratolí
+    o += `<g class="now-g"><line class="now" x1="${X(frame)}" x2="${X(frame)}" y1="${pt - 2}" y2="${h - pb}"/></g>`;
+    o += `<g class="hov" style="display:none"><line x1="0" x2="0" y1="${pt - 2}" y2="${h - pb}" stroke="var(--ink)" stroke-width="1"/>` +
+         `<circle r="3.2" fill="var(--ink)" stroke="var(--panel)" stroke-width="1.5"/></g>`;
+    o += `<rect class="hit" x="${pl}" y="0" width="${w - pl - pr}" height="${h}" fill="transparent"/></svg>`;
+    return o;
+  }
+  // Ratolí: valor i hora sota el cursor · clic: el mapa salta a aquella hora
+  function attachChart(root, Ly, ser) {
+    const svg = root.querySelector("svg"); if (!svg) return;
+    const head = root.querySelector(".pp-chart-h"), headHtml = head.innerHTML;
+    const pt = CHART.pt + (Ly.hasDir ? 12 : 0), Yd = +svg.dataset.ymin, Yu = +svg.dataset.ymax;
+    const Y = v => CHART.h - CHART.pb - (v - Yd) / (Yu - Yd) * (CHART.h - CHART.pb - pt);
+    const { w, pl, pr } = CHART, T = Ly.times.length, X = k => pl + (T > 1 ? k / (T - 1) : 0.5) * (w - pl - pr);
+    const hov = svg.querySelector(".hov"), ln = hov.querySelector("line"), dot = hov.querySelector("circle");
+    const F = FORMAT[Ly.units], fmtTip = new Intl.DateTimeFormat("ca-ES", { timeZone: TZ, weekday: "short", hour: "2-digit", hourCycle: "h23" });
+    const kAt = ev => {
+      const r = svg.getBoundingClientRect(), x = (ev.clientX - r.left) * (w / r.width);
+      return Math.max(0, Math.min(T - 1, Math.round((x - pl) / (w - pl - pr) * (T - 1))));
+    };
+    svg.addEventListener("mousemove", ev => {
+      const k = kAt(ev), x = X(k);
+      const val = Ly.isClouds ? ser.vals.map((a, c) => `${Ly.D.ramps[c].label[0]} ${Math.round(a[k])}`).join(" · ") + " %"
+                              : (ser.vals[0][k] === ser.vals[0][k] ? F.short(ser.vals[0][k]).replace(/ \(.*\)$/, "") : "–");
+      const fd = fmtTip.format(Ly.times[k]).replace(/^./, c => c.toUpperCase());
+      head.innerHTML = `<span>${fd} h</span><b>${val}</b>`;
+      ln.setAttribute("x1", x); ln.setAttribute("x2", x);
+      const v = ser.vals[0][k];
+      dot.style.display = !Ly.isClouds && v === v ? "" : "none";
+      if (v === v) { dot.setAttribute("cx", x); dot.setAttribute("cy", Y(v)); }
+      hov.style.display = "";
+    });
+    svg.addEventListener("mouseleave", () => { hov.style.display = "none"; head.innerHTML = headHtml; });
+    svg.addEventListener("click", ev => { setPlaying(false); setFrame(kAt(ev)); });
+  }
+  function chartHeader(Ly, ser) {
+    const v = ser.vals[0], ok = Array.from(v).filter(x => x === x), F = FORMAT[Ly.units];
+    if (!ok.length) return "";
+    if (Ly.isClouds) return `<span class="pp-leg">${Ly.D.ramps.map(r => `<span><i style="background:${r.a}"></i>${r.label}</span>`).join("")}</span><b></b>`;
+    const sum = ok.reduce((a, b) => a + b, 0);
+    if (Ly.layer === "precip") return `<span>Total de la previsió</span><b>${fmt(sum, 1)} mm</b>`;
+    if (Ly.layer === "neu") return `<span>Total de la previsió</span><b>${fmt(sum, 1)} cm</b>`;
+    if (Ly.layer === "acum") return `<span>Al final de la previsió</span><b>${fmt(ok[ok.length - 1], 1)} mm</b>`;
+    if (Ly.layer === "vent") return `<span>Mitjana</span><b>${Math.round(sum / ok.length)} ${Ly.units}</b>`;
+    if (Ly.layer === "temp") return `<span>Mitjana</span><b>${fmt(sum / ok.length, 1)} °C</b>`;
+    return `<span>Mitjana</span><b>${F.short(sum / ok.length)}</b>`;
+  }
+  let chartNow = null;                                     // actualitza la línia d'hora actual si la finestra és oberta
+  // El contingut de la finestra és un element DOM (no un text): així popup.update() no esborra el que s'hi afegeix
+  const nodeOf = html => { const d = document.createElement("div"); d.innerHTML = html; return d; };
+  function fillChart(popup, Ly, ll) {
+    const el = () => { const c = popup.getContent(); return c && c.querySelector ? c.querySelector(".pp-chart") : null; };
+    loadCube(Ly).then(cube => {
+      const box = el(); if (!box || !popup.isOpen()) return;
+      const ser = seriesAt(Ly, cube, ll);
+      box.innerHTML = `<div class="pp-chart-h">${chartHeader(Ly, ser)}</div>${chartSvg(Ly, ser)}`;
+      attachChart(box, Ly, ser);
+      chartNow = () => {
+        const b = el(); if (!b || !popup.isOpen() || Ly !== layer) return;
+        const g = b.querySelector(".now-g line"); if (!g) return;
+        const T = Ly.times.length, x = CHART.pl + (T > 1 ? frame / (T - 1) : 0.5) * (CHART.w - CHART.pl - CHART.pr);
+        g.setAttribute("x1", x); g.setAttribute("x2", x);
+      };
+      popup.update();
+    }).catch(e => { const box = el(); if (box) box.innerHTML = `<div class="pp-chart-load">No s'ha pogut carregar la sèrie (${e.message})</div>`; });
+  }
+  const chartBox = `<div class="pp-chart"><div class="pp-chart-load">Carregant l'evolució…</div></div>`;
+
+  map.on("click", e => {
+    show(e.latlng, null); tip.style.display = "none";
+    const s = sample(e.latlng), F = FORMAT[layer.units], ok = s.v != null, Ly = layer;
+    const popup = L.popup({ className: "sst-popup", autoPan: true, offset: [0, -4], minWidth: CHART.w, maxWidth: CHART.w + 40 });
+    if (Ly.isClouds) {
+      const body = ok ? Ly.D.ramps.map((r, k) =>
+        `<div class="pp-c3"><span class="pp-mm-sw" style="background:${r.a}"></span><b>${Math.round(s.c3[k])} %</b>${r.label}</div>`).join("")
+        : `<div class="pp-val pp-empty">${s.v === null ? "Sense dada" : "Fora de la zona"}</div>`;
+      popup.setLatLng(e.latlng).setContent(nodeOf(`<div class="pp-line" style="margin:0 0 4px">Núvols</div>${body}
+        <div class="pp-line">${coordText(e.latlng)}</div><div class="pp-line">${whenEl.textContent}</div>${ok ? chartBox : ""}`)).openOn(map);
+      if (ok) fillChart(popup, Ly, e.latlng);
+      return;
+    }
+    const loading = ok && Ly.stats ? `<div class="pp-stats pp-line">Calculant màxim i mínim…</div>` : "";
+    popup.setLatLng(e.latlng).setContent(nodeOf(`
+      <div class="pp">
+        <span class="pp-sw" style="background:${ok ? layer.colorOf(s.v) : "transparent"}"></span>
+        <div style="flex:1">
+          <div class="pp-line" style="margin:0 0 2px">${layer.label}</div>
+          <div class="pp-val${ok ? "" : " pp-empty"}">${ok ? F.short(s.v) : (s.v === null ? "Sense dada" : "Fora de la zona")}</div>
+          ${ok && s.d != null ? `<div class="pp-line">${dirText(layer.dir_kind, s.d)}</div>` : ""}
+          <div class="pp-line">${coordText(e.latlng)}</div>
+          <div class="pp-line">${whenEl.textContent}</div>
+          <div class="pp-statsbox">${loading}</div>
+          ${ok ? chartBox : ""}
+        </div>
+      </div>`)).openOn(map);
+    if (ok) {
+      loadStats(Ly).then(st => {
+        const b = popup.isOpen() && popup.getContent().querySelector(".pp-statsbox");
+        if (b) { b.innerHTML = statsHtml(Ly, st, e.latlng); popup.update(); }
+      });
+      fillChart(popup, Ly, e.latlng);
+    }
+  });
+
+  // ---------------------------------------------------------
+  // DESCÀRREGA: imatge PNG o vídeo MP4 de la zona visible
+  // ---------------------------------------------------------
+  const DL = {
+    panel: document.getElementById("dl-panel"), go: document.getElementById("dl-go"),
+    prog: document.getElementById("dl-prog"), from: document.getElementById("dl-from"),
+    to: document.getElementById("dl-to"), size: document.getElementById("dl-size"),
+    speed: document.getElementById("dl-speed"), arrows: document.getElementById("dl-arrows"),
+    busy: false, cancel: false,
+  };
+  const DlControl = L.Control.extend({
+    options: { position: "topright" },
+    onAdd() {
+      const b = L.DomUtil.create("button", "dl-btn leaflet-control");
+      b.type = "button"; b.title = "Descarregar imatge o vídeo"; b.setAttribute("aria-label", "Descarregar imatge o vídeo");
+      b.innerHTML = '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 4v11M7 10l5 5 5-5M5 20h14"/></svg>';
+      L.DomEvent.disableClickPropagation(b);
+      L.DomEvent.on(b, "click", () => toggleDl(DL.panel.hidden));
+      return b;
+    },
+  });
+  new DlControl().addTo(map);
+  L.DomEvent.disableClickPropagation(DL.panel);
+  L.DomEvent.disableScrollPropagation(DL.panel);
+
+  const fmtOpt = new Intl.DateTimeFormat("ca-ES", { timeZone: TZ, weekday: "short", day: "numeric", hour: "2-digit", minute: "2-digit" });
+  function fillHours() {
+    const opts = layer.times.map((t, k) => `<option value="${k}">${fmtOpt.format(t)} h</option>`).join("");
+    DL.from.innerHTML = opts; DL.to.innerHTML = opts;
+    DL.from.value = frame;
+    DL.to.value = Math.min(layer.times.length - 1, frame + 47);
+  }
+  function toggleDl(open) {
+    if (DL.busy && !open) return;
+    DL.panel.hidden = !open;
+    if (open) { fillHours(); DL.arrows.checked = document.getElementById("arrows-toggle").checked; updateDlForm(); }
+  }
+  function updateDlForm() {
+    const video = DL.panel.querySelector("input[name=dl-fmt]:checked").value === "mp4";
+    DL.panel.querySelectorAll(".dl-video-only").forEach(el => { el.hidden = !video; });
+    if (!DL.busy) DL.prog.textContent = "";
+  }
+  DL.panel.addEventListener("change", e => { if (e.target.name === "dl-fmt") updateDlForm(); });
+  document.getElementById("dl-close").addEventListener("click", () => {
+    if (DL.busy) { DL.cancel = true; return; }
+    toggleDl(false);
+  });
+  document.addEventListener("keydown", e => { if (e.key === "Escape" && !DL.panel.hidden && !DL.busy) toggleDl(false); });
+
+  function exportSize() {
+    if (DL.size.value === "screen") {
+      const s = map.getSize(), r = Math.min(2, window.devicePixelRatio || 1);
+      return [Math.round(s.x * r / 2) * 2, Math.round(s.y * r / 2) * 2];
+    }
+    return DL.size.value.split("x").map(Number);
+  }
+
+  // Mapa ocult de la mida de sortida, encaixat a la zona visible
+  async function makeExportMap(W, H) {
+    const div = document.createElement("div");
+    div.style.cssText = `position:fixed;left:-${W + 100}px;top:0;width:${W}px;height:${H}px;`;
+    document.body.appendChild(div);
+    const m = L.map(div, { zoomControl: false, attributionControl: false, zoomSnap: 0, fadeAnimation: false, zoomAnimation: false });
+    m.fitBounds(map.getBounds(), { animate: false });
+    const tiles = L.tileLayer("https://server.arcgisonline.com/ArcGIS/rest/services/World_Shaded_Relief/MapServer/tile/{z}/{y}/{x}",
+      { maxNativeZoom: 13, crossOrigin: "anonymous" });
+    await new Promise(res => { tiles.once("load", res); setTimeout(res, 15000); tiles.addTo(m); });
+    // Base: fons de relleu (si el servidor no permet copiar-lo, es fa servir un color de terra)
+    const base = document.createElement("canvas");
+    base.width = W; base.height = H;
+    let bctx = base.getContext("2d");
+    const paintFallback = () => { bctx.fillStyle = "#ddd8cc"; bctx.fillRect(0, 0, W, H); };
+    paintFallback();
+    const box = div.getBoundingClientRect();
+    div.querySelectorAll("img.leaflet-tile-loaded").forEach(img => {
+      const r = img.getBoundingClientRect();
+      try { bctx.drawImage(img, r.left - box.left, r.top - box.top, r.width, r.height); } catch (e) {}
+    });
+    try { bctx.getImageData(0, 0, 1, 1); }
+    catch (e) { base.width = W; bctx = base.getContext("2d"); paintFallback(); }   // fons "contaminat": sense relleu
+    return { m, div, base };
+  }
+
+  // Textos i llegenda damunt de la imatge
+  function drawOverlay(ctx, W, H, k) {
+    const sc = Math.max(1, Math.min(W, H) / 720), F = FORMAT[layer.units];
+    const font = (w, px, fam = "Barlow Semi Condensed") => `${w} ${Math.round(px * sc)}px "${fam}", Arial, sans-serif`;
+    const pad = 14 * sc, panel = "rgba(244,247,250,0.92)", ink = "#102030", soft = "#4a6075";
+    const rr = (x, y, w, h, r) => { ctx.beginPath(); ctx.roundRect(x, y, w, h, r); ctx.fill(); };
+    // Títol i data
+    const t1 = `Previsió AROME · ${layer.label}`;
+    const t2 = fmtLocal.format(layer.times[k]).replace(/^./, c => c.toUpperCase()) + " h";
+    ctx.font = font(600, 22); const w1 = ctx.measureText(t1).width;
+    ctx.font = font(500, 17); const w2 = ctx.measureText(t2).width;
+    ctx.fillStyle = panel; rr(pad, pad, Math.max(w1, w2) + 2 * pad, 64 * sc, 6 * sc);
+    ctx.fillStyle = ink; ctx.textBaseline = "alphabetic";
+    ctx.font = font(600, 22); ctx.fillText(t1, 2 * pad, pad + 28 * sc);
+    ctx.fillStyle = soft; ctx.font = font(500, 17); ctx.fillText(t2, 2 * pad, pad + 52 * sc);
+    // Llegenda vertical
+    const lh = Math.min(H - 2 * pad - 60 * sc, 420 * sc), lw = 16 * sc, bx = W - pad - 56 * sc, by = (H - lh) / 2;
+    ctx.fillStyle = panel; rr(bx - 8 * sc, by - 26 * sc, 64 * sc, lh + 40 * sc, 6 * sc);
+    if (layer.isClouds) {
+      const bw = 10 * sc;
+      layer.D.ramps.forEach((r, k) => {
+        const x = bx - 2 * sc + k * 13 * sc;
+        ctx.fillStyle = "#fff"; ctx.fillRect(x, by, bw, lh);
+        for (let c = 0; c < 100; c++) { ctx.fillStyle = cloudCss(layer, k, c + 0.5); ctx.fillRect(x, by + lh - (c + 1) * lh / 100, bw, lh / 100 + 0.5); }
+        ctx.strokeStyle = "#b9c8d6"; ctx.lineWidth = 1; ctx.strokeRect(x, by, bw, lh);
+        ctx.fillStyle = soft; ctx.font = font(600, 12); ctx.textBaseline = "middle"; ctx.fillText(r.label[0], x + 1 * sc, by - 14 * sc);
+      });
+      ctx.font = font(500, 11, "Barlow");
+      [0, 50, 100].forEach(t => ctx.fillText(String(t), bx + 38 * sc, by + lh - t / 100 * lh));
+    } else {
+    const n = layer.NB;
+    layer.colors.forEach((c, i) => { ctx.fillStyle = c; ctx.fillRect(bx, by + lh - (i + 1) * lh / n, lw, lh / n + 0.5); });
+    ctx.strokeStyle = "#b9c8d6"; ctx.lineWidth = 1; ctx.strokeRect(bx, by, lw, lh);
+    ctx.fillStyle = soft; ctx.font = font(500, 12, "Barlow"); ctx.textBaseline = "middle";
+    ctx.fillText(layer.units, bx, by - 14 * sc);
+    layer.thr.forEach((t, i) => { if (showTick(layer, t, i)) ctx.fillText(F.tick(t), bx + lw + 5 * sc, by + lh - i * lh / n); });
+    }
+    // Crèdits
+    const cr = `${layer.source} · Relleu © Esri · meteo4u.com · @enricagud`;
+    ctx.font = font(400, 12, "Barlow"); const cw = ctx.measureText(cr).width;
+    ctx.fillStyle = panel; rr(pad, H - pad - 20 * sc, cw + 14 * sc, 20 * sc, 3 * sc);
+    ctx.fillStyle = soft; ctx.textBaseline = "middle"; ctx.fillText(cr, pad + 7 * sc, H - pad - 10 * sc);
+  }
+
+  // Camp de colors d'una hora a la mida de sortida
+  function renderField(ex, W, H) {
+    const c = document.createElement("canvas");
+    c.width = W; c.height = H;
+    drawField(ex.m, c.getContext("2d"), { x: W, y: H });
+    return c;
+  }
+  function composeFrame(ctx, ex, fieldC, W, H, k, phase) {
+    ctx.drawImage(ex.base, 0, 0);
+    ctx.globalAlpha = 0.85; ctx.drawImage(fieldC, 0, 0); ctx.globalAlpha = 1;
+    drawCoast(ex.m, ctx, Math.max(1, Math.min(W, H) / 720));
+    if (DL.arrows.checked && layer.hasDir) drawArrows(ex.m, ctx, { x: W, y: H }, phase, true, Math.max(1, Math.min(W, H) / 720));
+    drawOverlay(ctx, W, H, k);
+  }
+
+  function saveBlob(blob, name) {
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob); a.download = name;
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(a.href), 4000);
+  }
+  const stamp = t => t.toISOString().slice(0, 13).replace(/[-T]/g, "");
+  function loadScript(src) {
+    return new Promise((res, rej) => {
+      const s = document.createElement("script"); s.src = src; s.onload = res; s.onerror = () => rej(new Error("no s'ha pogut carregar " + src));
+      document.head.appendChild(s);
+    });
+  }
+  async function pickCodec(W, H, bitrate) {
+    for (const codec of ["avc1.640034", "avc1.640028", "avc1.4d0028", "avc1.42002a", "avc1.42001f"]) {
+      try {
+        const r = await VideoEncoder.isConfigSupported({ codec, width: W, height: H, bitrate, framerate: 30 });
+        if (r.supported) return codec;
+      } catch (e) {}
+    }
+    return null;
+  }
+
+  async function runExport() {
+    const video = DL.panel.querySelector("input[name=dl-fmt]:checked").value === "mp4";
+    const [W, H] = exportSize();
+    const savedFrame = frame, wasPlaying = !!timer;
+    setPlaying(false);
+    DL.busy = true; DL.cancel = false; DL.go.disabled = true;
+    document.getElementById("dl-close").setAttribute("aria-label", "Cancel·la");
+    const say = (txt, frac) => { DL.prog.innerHTML = frac == null ? txt : `${txt}<br><progress max="1" value="${frac}"></progress>`; };
+    let ex = null;
+    try {
+      await document.fonts.ready;
+      say("Preparant el mapa…");
+      ex = await makeExportMap(W, H);
+      const out = document.createElement("canvas");
+      out.width = W; out.height = H;
+      const ctx = out.getContext("2d");
+
+      if (!video) {
+        frame = savedFrame;
+        composeFrame(ctx, ex, renderField(ex, W, H), W, H, frame, null);
+        const blob = await new Promise(r => out.toBlob(r, "image/png"));
+        saveBlob(blob, `arome_${layer.layer}_${stamp(layer.times[frame])}.png`);
+        say("Imatge descarregada.");
+        return;
+      }
+
+      let k0 = +DL.from.value, k1 = +DL.to.value;
+      if (k1 < k0) [k0, k1] = [k1, k0];
+      const FPS = 30, perHour = Math.max(1, Math.round(+DL.speed.value * FPS));
+      const total = (k1 - k0 + 1) * perHour;
+      const name = `arome_${layer.layer}_${stamp(layer.times[k0])}-${stamp(layer.times[k1])}`;
+
+      const bitrate = Math.round(W * H * FPS * 0.12);
+      const codec = "VideoEncoder" in window ? await pickCodec(W, H, bitrate) : null;
+      if (codec) {
+        // MP4 (H.264) amb WebCodecs: cada fotograma exacte, independent de la velocitat de l'ordinador
+        say("Carregant el codificador…");
+        if (!window.Mp4Muxer) await loadScript("https://cdn.jsdelivr.net/npm/mp4-muxer@5.1.3/build/mp4-muxer.js");
+        const target = new Mp4Muxer.ArrayBufferTarget();
+        const muxer = new Mp4Muxer.Muxer({ target, video: { codec: "avc", width: W, height: H }, fastStart: "in-memory" });
+        let encErr = null;
+        const enc = new VideoEncoder({ output: (chunk, meta) => muxer.addVideoChunk(chunk, meta), error: e => { encErr = e; } });
+        enc.configure({ codec, width: W, height: H, bitrate, framerate: FPS });
+        let n = 0;
+        for (let k = k0; k <= k1; k++) {
+          if (DL.cancel) throw new Error("cancel·lat");
+          await loadFrame(layer, k); frame = k;
+          const fieldC = renderField(ex, W, H);
+          for (let f = 0; f < perHour; f++, n++) {
+            composeFrame(ctx, ex, fieldC, W, H, k, DL.arrows.checked ? n / FPS : null);
+            const vf = new VideoFrame(out, { timestamp: Math.round(n * 1e6 / FPS), duration: Math.round(1e6 / FPS) });
+            enc.encode(vf, { keyFrame: n % (FPS * 2) === 0 });
+            vf.close();
+            while (enc.encodeQueueSize > 8) await new Promise(r => setTimeout(r, 4));
+            if (encErr) throw encErr;
+          }
+          say(`Generant vídeo… ${Math.round(100 * n / total)} %`, n / total);
+        }
+        await enc.flush(); enc.close(); muxer.finalize();
+        saveBlob(new Blob([target.buffer], { type: "video/mp4" }), name + ".mp4");
+        say(`Vídeo descarregat (${(target.buffer.byteLength / 1e6).toFixed(1)} MB).`);
+      } else {
+        // Navegadors sense codificador H.264: gravació en temps real (WebM)
+        const stream = out.captureStream(FPS);
+        const rec = new MediaRecorder(stream, { mimeType: MediaRecorder.isTypeSupported("video/webm;codecs=vp9") ? "video/webm;codecs=vp9" : "video/webm", videoBitsPerSecond: 8e6 });
+        const chunks = []; rec.ondataavailable = e => e.data.size && chunks.push(e.data);
+        const done = new Promise(r => { rec.onstop = r; });
+        rec.start();
+        let n = 0;
+        for (let k = k0; k <= k1; k++) {
+          if (DL.cancel) { rec.stop(); throw new Error("cancel·lat"); }
+          await loadFrame(layer, k); frame = k;
+          const fieldC = renderField(ex, W, H);
+          for (let f = 0; f < perHour; f++, n++) {
+            composeFrame(ctx, ex, fieldC, W, H, k, DL.arrows.checked ? n / FPS : null);
+            await new Promise(r => setTimeout(r, 1000 / FPS));
+          }
+          say(`Gravant vídeo… ${Math.round(100 * n / total)} %`, n / total);
+        }
+        rec.stop(); await done;
+        saveBlob(new Blob(chunks, { type: "video/webm" }), name + ".webm");
+        say("Vídeo descarregat (format WebM: aquest navegador no fa MP4).");
+      }
+    } catch (e) {
+      console.error(e);
+      say(e.message === "cancel·lat" ? "Cancel·lat." : `No s'ha pogut generar: ${e.message}`);
+    } finally {
+      if (ex) { ex.m.remove(); ex.div.remove(); }
+      frame = savedFrame;
+      DL.busy = false; DL.go.disabled = false;
+      document.getElementById("dl-close").setAttribute("aria-label", "Tanca");
+      renderTime(); fieldLayer.redraw(); arrowLayer.redraw(); ensureFrame(frame);
+      if (wasPlaying) setPlaying(true);
+    }
+  }
+  DL.go.addEventListener("click", () => { if (!DL.busy) runExport(); });
+
+  renderAll();
+  syncArrows();
+})();
+</script>
+</body>
+</html>
