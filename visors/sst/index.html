@@ -1,0 +1,769 @@
+<!DOCTYPE html>
+<html lang="ca">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Temperatura de l'aigua del mar</title>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow:wght@400;500&family=Barlow+Semi+Condensed:wght@500;600;700&display=swap">
+<style>
+  :root {
+    --ink: #102030;
+    --ink-soft: #4a6075;
+    --panel: rgba(244, 247, 250, 0.94);
+    --line: #b9c8d6;
+    --sea: #c8dce8;
+    --sans: "Barlow", "Helvetica Neue", Arial, sans-serif;
+    --cond: "Barlow Semi Condensed", "Arial Narrow", Arial, sans-serif;
+  }
+  html, body { height: 100%; margin: 0; }
+  body { background: var(--sea); color: var(--ink); font-family: var(--sans); }
+  #map { position: absolute; inset: 0; background: var(--sea); }
+  .sst-canvas { opacity: 0.88; pointer-events: none; }
+
+  /* Panell de lectura */
+  .panel {
+    position: absolute; z-index: 1000; top: max(12px, env(safe-area-inset-top));
+    left: 12px; width: 222px; padding: 10px 12px 9px;
+    background: var(--panel); border-radius: 6px;
+    box-shadow: 0 1px 3px rgba(16, 32, 48, 0.25);
+  }
+  .panel h1 { font-family: var(--cond); font-weight: 600; font-size: 17px; line-height: 1.15; margin: 0; }
+  .panel .date { color: var(--ink-soft); font-size: 12px; margin-top: 1px; }
+  .readout { display: flex; align-items: center; gap: 10px; margin: 8px 0 3px; min-height: 40px; }
+  .swatch { width: 11px; align-self: stretch; border-radius: 2px; background: transparent; border: 1px solid var(--line); }
+  .value { font-family: var(--cond); font-weight: 700; font-size: 34px; line-height: 1; font-variant-numeric: tabular-nums; }
+  .value small { font-size: 16px; font-weight: 500; margin-left: 2px; color: var(--ink-soft); }
+  .value.empty { font-size: 13.5px; font-weight: 500; color: var(--ink-soft); font-family: var(--sans); }
+  .coords { font-size: 12px; color: var(--ink-soft); font-variant-numeric: tabular-nums; min-height: 1.3em; }
+  .stats { display: grid; grid-template-columns: repeat(3, 1fr); margin-top: 7px; padding-top: 6px; border-top: 1px solid var(--line); }
+  .stats div { font-size: 11px; color: var(--ink-soft); }
+  .stats b { display: block; font-family: var(--cond); font-weight: 600; font-size: 15px; color: var(--ink); font-variant-numeric: tabular-nums; }
+
+  .toggle { display: flex; align-items: center; gap: 7px; margin-top: 6px; font-size: 13px; cursor: pointer; }
+  .toggle input { width: 14px; height: 14px; margin: 0; accent-color: var(--ink); }
+  .toggle input:focus-visible { outline: 2px solid var(--ink); outline-offset: 2px; }
+
+  /* Etiquetes de les isotermes (com clabel al PNG) */
+  .iso-label {
+    font-family: var(--cond); font-weight: 600; font-size: 13px; color: #000;
+    white-space: nowrap; pointer-events: none;
+    text-shadow: 0 0 2px #fff, 0 0 3px #fff, 0 0 4px rgba(255,255,255,.8);
+  }
+
+  /* Finestra emergent en clicar */
+  .sst-popup .leaflet-popup-content-wrapper { border-radius: 6px; background: var(--panel); color: var(--ink); }
+  .sst-popup .leaflet-popup-content { margin: 10px 26px 10px 12px; font-family: var(--sans); }
+  .sst-popup .pp { display: flex; gap: 10px; align-items: stretch; }
+  .sst-popup .pp-sw { width: 10px; border-radius: 2px; border: 1px solid var(--line); flex: none; }
+  .sst-popup .pp-val { font-family: var(--cond); font-weight: 700; font-size: 26px; line-height: 1.1; font-variant-numeric: tabular-nums; }
+  .sst-popup .pp-val.pp-empty { font-size: 15px; font-weight: 500; font-family: var(--sans); color: var(--ink-soft); }
+  .sst-popup .pp-coord { font-size: 12.5px; color: var(--ink-soft); font-variant-numeric: tabular-nums; margin-top: 3px; }
+  .sst-popup .pp-date { font-size: 12px; color: var(--ink-soft); margin-top: 6px; }
+
+  /* Valors extrems */
+  .ext-scope { display: flex; gap: 12px; margin: 3px 0 0 21px; font-size: 12px; color: var(--ink-soft); }
+  .ext-scope label { display: flex; align-items: center; gap: 5px; cursor: pointer; }
+  .ext-scope input { margin: 0; accent-color: var(--ink); }
+  .ext-scope.off { opacity: 0.4; pointer-events: none; }
+  .ext-icon { position: relative; }
+  .ext-dot {
+    position: absolute; left: 0; top: 0; width: 12px; height: 12px; border-radius: 50%;
+    border: 2px solid #fff; box-shadow: 0 0 0 1.5px var(--ink); box-sizing: border-box;
+  }
+  .ext-lab {
+    position: absolute; left: 16px; top: -5px; white-space: nowrap;
+    padding: 2px 7px 2px 6px; border-radius: 3px; background: var(--panel);
+    font-family: var(--cond); font-weight: 600; font-size: 14px; color: var(--ink);
+    box-shadow: 0 1px 3px rgba(16, 32, 48, 0.35); border-left: 4px solid;
+    font-variant-numeric: tabular-nums;
+  }
+  /* Anell mòbil (pols) al voltant del màxim i el mínim */
+  .ext-ring {
+    position: absolute; left: -4px; top: -4px; width: 20px; height: 20px; border-radius: 50%;
+    border: 2.5px solid; box-sizing: border-box; pointer-events: none;
+    animation: ext-pols 1.8s ease-out infinite;
+  }
+  .ext-ring.max { border-color: #C8140F; }
+  .ext-ring.min { border-color: #3C00C8; }
+  .ext-ring.r2 { animation-delay: 0.9s; }
+  @keyframes ext-pols {
+    0%   { transform: scale(0.6); opacity: 0.95; }
+    100% { transform: scale(2.6); opacity: 0; }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .ext-ring { animation: none; transform: scale(1.3); opacity: 0.8; }
+    .ext-ring.r2 { display: none; }
+  }
+  .ext-lab.max { border-left-color: #C8140F; }
+  .ext-lab.min { border-left-color: #3C00C8; }
+
+  /* Llegenda vertical */
+  .legend {
+    position: absolute; z-index: 1000; right: 12px; top: 50%; transform: translateY(-50%);
+    height: min(70vh, 520px); width: 64px; padding: 10px 8px;
+    background: var(--panel); border-radius: 6px; box-shadow: 0 1px 3px rgba(16, 32, 48, 0.25);
+    box-sizing: border-box;
+  }
+  .legend .bar { position: absolute; left: 10px; top: 10px; bottom: 10px; width: 16px; border: 1px solid var(--line); }
+  .legend .tick { position: absolute; left: 30px; font-size: 11px; color: var(--ink-soft); transform: translateY(50%); font-variant-numeric: tabular-nums; }
+  .legend .marker {
+    position: absolute; left: 2px; width: 32px; height: 0; border-top: 2px solid var(--ink);
+    display: none; transition: bottom 80ms linear;
+  }
+
+  /* Etiqueta que segueix el cursor */
+  .tip {
+    position: absolute; z-index: 1001; pointer-events: none; display: none;
+    padding: 3px 7px; border-radius: 3px; background: var(--ink); color: #fff;
+    font-family: var(--cond); font-weight: 600; font-size: 15px; white-space: nowrap;
+    transform: translate(12px, -130%);
+  }
+
+  .credit {
+    position: absolute; z-index: 1000; left: 12px; bottom: max(8px, env(safe-area-inset-bottom));
+    font-size: 11px; color: var(--ink-soft); background: var(--panel); padding: 3px 7px; border-radius: 3px;
+  }
+  .error { position: absolute; z-index: 1002; inset: 0; display: none; place-items: center; background: var(--sea); }
+  .error p { max-width: 460px; background: var(--panel); padding: 18px 20px; border-radius: 6px; line-height: 1.45; }
+
+  @media (max-width: 600px) {
+    .panel { width: auto; right: 90px; }
+    .value { font-size: 30px; }
+    .credit { display: none; }
+  }
+
+  /* Selector de capa */
+  .seg { display: flex; margin: 7px 0 0; border: 1px solid var(--line); border-radius: 5px; overflow: hidden; }
+  .seg button {
+    flex: 1; padding: 4px 6px; border: 0; background: transparent; color: var(--ink-soft);
+    font-family: var(--cond); font-weight: 500; font-size: 13px; cursor: pointer;
+  }
+  .seg button + button { border-left: 1px solid var(--line); }
+  .seg button[aria-pressed="true"] { background: var(--ink); color: #fff; }
+  .seg button:disabled { opacity: 0.45; cursor: default; }
+  .seg button:focus-visible { outline: 2px solid var(--ink); outline-offset: -2px; }
+  .second { font-size: 12px; color: var(--ink-soft); min-height: 1.3em; font-variant-numeric: tabular-nums; }
+  .ref { font-size: 11px; color: var(--ink-soft); margin-top: 3px; }
+</style>
+</head>
+<body>
+<div id="map"></div>
+
+<section class="panel" aria-live="polite">
+  <h1 id="title">Temperatura de l'aigua del mar</h1>
+  <div class="date" id="date">Carregant dades…</div>
+  <div class="seg" id="seg" role="group" aria-label="Capa">
+    <button type="button" data-mode="sst" aria-pressed="true">Temperatura</button>
+    <button type="button" data-mode="anom" aria-pressed="false" disabled>Anomalia</button>
+  </div>
+  <div class="ref" id="ref" hidden>Diferència respecte a la mitjana 1991–2020 per a aquesta època de l'any</div>
+  <div class="readout">
+    <div class="swatch" id="swatch"></div>
+    <div class="value empty" id="value">Passa el cursor pel mar</div>
+  </div>
+  <div class="second" id="second"></div>
+  <div class="coords" id="coords"></div>
+  <div class="stats">
+    <div>Mitjana<b id="s-mean">–</b></div>
+    <div>Mínima<b id="s-min">–</b></div>
+    <div>Màxima<b id="s-max">–</b></div>
+  </div>
+  <label class="toggle"><input type="checkbox" id="iso-toggle" checked> Mostra isotermes</label>
+  <label class="toggle"><input type="checkbox" id="ext-toggle" checked> Mostra valors extrems</label>
+  <div class="ext-scope" id="ext-scope">
+    <label><input type="radio" name="ext-scope" value="visible" checked> Zona visible</label>
+    <label><input type="radio" name="ext-scope" value="tot"> Tot el mapa</label>
+  </div>
+  <div class="ext-scope" id="ext-med-row">
+    <label><input type="checkbox" id="ext-med" checked> Només Mediterrani</label>
+  </div>
+</section>
+
+<div class="legend" id="legend" aria-hidden="true">
+  <div class="bar" id="legend-bar"></div>
+  <div class="marker" id="legend-marker"></div>
+</div>
+
+<div class="tip" id="tip"></div>
+<div class="credit" id="credit">@enricagud</div>
+<div class="error" id="error"><p id="error-msg"></p></div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+<script>
+(async function () {
+  // ---------------------------------------------------------
+  // CONFIGURACIÓ
+  // ---------------------------------------------------------
+  // Fitxers: ?data=sst_2026-09-28.json&anom=sst_anom_2026-09-28.json  (per defecte, els últims)
+  // Capa inicial: ?capa=anomalia     Vista: per defecte la Mediterrània occidental;
+  //   ?vista=tot (tot el domini) o ?vista=lon_min,lon_max,lat_min,lat_max
+  const params = new URLSearchParams(location.search);
+  const DATA_URL = params.get("data") || "sst_actual.json";
+  const ANOM_URL = params.get("anom") || "sst_anom_actual.json";
+
+  // Vista inicial: Mediterrània occidental (lon_min, lon_max, lat_min, lat_max). null = tot el domini
+  const VISTA_INICIAL = [-4.0, 12.5, 35.2, 44.5];
+  const VISTA_MOBIL   = [-1.0, 9.5, 37.0, 43.5];      // pantalles estretes: Balears, golf de Lleó i Sardenya
+
+  // Zones del fitxer de Copernicus que NO són Mediterrani (per als extrems)
+  const ZONES_EXCLOSES = [
+    [-30.0, -5.6, 20.0, 50.0],   // Atlàntic, a l'oest de Gibraltar
+    [-30.0,  2.0, 42.5, 50.0],   // golf de Biscaia
+    [ 27.0, 45.0, 40.2, 50.0],   // mar de Màrmara i mar Negra
+  ];
+
+  const fmt = (x, d = 1) => x.toLocaleString("ca-ES", { minimumFractionDigits: d, maximumFractionDigits: d });
+  const fmtSigned = (x, d = 1) => (x > 0.049 ? "+" : x < -0.049 ? "−" : "") + fmt(Math.abs(x), d);
+
+  // ---------------------------------------------------------
+  // CAMPS (temperatura i anomalia): cadascun amb la seva malla i paleta
+  // ---------------------------------------------------------
+  const MODES = {
+    sst: {
+      title: "Temperatura de l'aigua del mar",
+      value: t => `${fmt(t)}<small>°C</small>`,
+      short: t => `${fmt(t)} °C`,
+      stat:  t => `${fmt(t)}°`,
+      tick:  t => `${t}°`,
+      tickStep: 2,
+      extName: { max: "Màx", min: "Mín" },
+      extTitle: { max: "Punt més càlid", min: "Punt més fred" },
+    },
+    anom: {
+      title: "Anomalia de la temperatura del mar",
+      value: t => `${fmtSigned(t)}<small>°C</small>`,
+      short: t => `${fmtSigned(t)} °C`,
+      stat:  t => `${fmtSigned(t)}°`,
+      tick:  t => (t > 0 ? "+" : t < 0 ? "−" : "") + Math.abs(t) + "°",
+      tickStep: 1,
+      extName: { max: "Màx", min: "Mín" },
+      extTitle: { max: "Anomalia més alta", min: "Anomalia més baixa" },
+    },
+  };
+
+  function makeField(D) {
+    const f = { D, ...D };
+    const pal = D.palette;
+    f.T_MIN = pal[0][0]; f.T_MAX = pal[pal.length - 1][0];
+    f.STEP = pal[1][0] - pal[0][0];
+    f.NBINS = pal.length - 1;
+    f.binColors = pal.slice(0, f.NBINS).map(p => p[1]);
+    const rgb = f.binColors.map(h => [1, 3, 5].map(k => parseInt(h.slice(k, k + 2), 16)));
+    f.binOf = t => Math.min(f.NBINS - 1, Math.max(0, Math.floor((t - f.T_MIN) / f.STEP + 1e-9)));
+    f.colorOf = t => f.binColors[f.binOf(t)];
+
+    // Colors de cada interval com a enters RGBA de 32 bits (per pintar píxel a píxel)
+    f.packed = new Uint32Array(rgb.map(c => (255 << 24 | c[2] << 16 | c[1] << 8 | c[0]) >>> 0));
+
+    // Límits de la malla
+    f.south = f.lat0 - f.dlat / 2; f.north = f.lat0 + (f.nlat - 0.5) * f.dlat;
+    f.west  = f.lon0 - f.dlon / 2; f.east  = f.lon0 + (f.nlon - 0.5) * f.dlon;
+
+    // Màscara de zones no mediterrànies
+    f.excl = new Uint8Array(f.nlat * f.nlon);
+    for (const [w, e, sLat, nLat] of ZONES_EXCLOSES) {
+      const i0 = Math.max(0, Math.ceil((sLat - f.lat0) / f.dlat)), i1 = Math.min(f.nlat - 1, Math.floor((nLat - f.lat0) / f.dlat));
+      const j0 = Math.max(0, Math.ceil((w - f.lon0) / f.dlon)),    j1 = Math.min(f.nlon - 1, Math.floor((e - f.lon0) / f.dlon));
+      if (i1 < i0 || j1 < j0) continue;
+      for (let i = i0; i <= i1; i++) f.excl.fill(1, i * f.nlon + j0, i * f.nlon + j1 + 1);
+    }
+
+    // Interpolació bilineal entre els 4 centres de cel·la veïns, ignorant la terra (NaN).
+    // Si menys de la meitat del pes és mar, el punt es considera terra: la costa surt arrodonida.
+    f.interp = (lat, lng) => {
+      const fi = (lat - f.lat0) / f.dlat, fj = (lng - f.lon0) / f.dlon;
+      if (fi < -0.5 || fi > f.nlat - 0.5 || fj < -0.5 || fj > f.nlon - 0.5) return undefined;
+      const ci = Math.min(Math.max(fi, 0), f.nlat - 1), cj = Math.min(Math.max(fj, 0), f.nlon - 1);
+      const i0 = Math.min(Math.floor(ci), f.nlat - 2), j0 = Math.min(Math.floor(cj), f.nlon - 2);
+      const wy = ci - i0, wx = cj - j0, V = f.values, m = f.nlon, k = i0 * m + j0;
+      let num = 0, den = 0, v, w;
+      v = V[k];         w = (1 - wy) * (1 - wx); if (v === v) { num += w * v; den += w; }
+      v = V[k + 1];     w = (1 - wy) * wx;       if (v === v) { num += w * v; den += w; }
+      v = V[k + m];     w = wy * (1 - wx);       if (v === v) { num += w * v; den += w; }
+      v = V[k + m + 1]; w = wy * wx;             if (v === v) { num += w * v; den += w; }
+      return den < 0.5 ? null : num / den;
+    };
+
+    // Valor en un punt: undefined = fora de la malla, null = terra/sense dada (el mateix que es pinta)
+    f.sample = ll => f.interp(ll.lat, ll.lng);
+    return f;
+  }
+
+  // Els valors venen en un PNG de 16 bits: valor = (R*256 + G) * scale + offset, A = 0 terra.
+  // El JSON només porta metadades, paleta, estadístiques i isotermes.
+  // Els valors venen en un PNG de 16 bits: valor = (R*256 + G) * scale + offset, A = 0 terra.
+  // El JSON només porta metadades, paleta, estadístiques i isotermes.
+  // Resultat: D.values = Float32Array en °C, NaN = terra/sense dada (ràpid i lleuger).
+  async function loadField(url) {
+    const D = await loadJson(url);
+    const n = D.nlat, m = D.nlon, vals = new Float32Array(n * m);
+    if (!D.png) {                                          // compatible amb el JSON antic
+      const sc = D.scale || 1;
+      for (let k = 0; k < vals.length; k++) { const v = D.values[k]; vals[k] = v === null ? NaN : v * sc; }
+    } else {
+      const base = url.slice(0, url.lastIndexOf("/") + 1);
+      const r = await fetch(base + D.png, { cache: "no-cache" });
+      if (!r.ok) throw new Error(`HTTP ${r.status} (${D.png})`);
+      const bmp = await createImageBitmap(await r.blob(), { premultiplyAlpha: "none", colorSpaceConversion: "none" });
+      const c = document.createElement("canvas");
+      c.width = bmp.width; c.height = bmp.height;
+      const ctx = c.getContext("2d", { willReadFrequently: true });
+      ctx.drawImage(bmp, 0, 0);
+      bmp.close && bmp.close();
+      const px = ctx.getImageData(0, 0, m, n).data;
+      const sc = D.scale, off = D.offset;
+      for (let i = 0; i < n; i++) {
+        let p = (n - 1 - i) * m * 4, k = i * m;          // fila 0 del PNG = nord
+        for (let j = 0; j < m; j++, p += 4, k++) {
+          vals[k] = px[p + 3] < 128 ? NaN : (px[p] * 256 + px[p + 1]) * sc + off;
+        }
+      }
+      c.width = c.height = 0;                              // allibera memòria
+    }
+    D.values = vals;
+    D.scale = 1;                                           // els valors ja són en °C
+    return D;
+  }
+
+  async function loadJson(url) {
+    const r = await fetch(url, { cache: "no-cache" });
+    if (!r.ok) throw new Error(`HTTP ${r.status}`);
+    return r.json();
+  }
+
+  let sstData;
+  try {
+    sstData = await loadField(DATA_URL);
+  } catch (e) {
+    document.getElementById("error-msg").textContent =
+      `No s'ha pogut carregar ${DATA_URL} (${e.message}). Comprova que el fitxer és al mateix directori ` +
+      `i que obres la pàgina des d'un servidor web (per exemple: python3 -m http.server), no amb file://.`;
+    document.getElementById("error").style.display = "grid";
+    return;
+  }
+  const fields = { sst: makeField(sstData), anom: null };
+  let mode = "sst";
+  const cur = () => fields[mode];
+
+
+  // ---------------------------------------------------------
+  // MAPA
+  // ---------------------------------------------------------
+  const S = fields.sst;
+  const map = L.map("map", { zoomControl: false, attributionControl: true, minZoom: 3, maxZoom: 12, zoomSnap: 0.25, zoomDelta: 0.5 });
+  L.control.zoom({ position: "bottomright" }).addTo(map);
+  L.tileLayer("https://server.arcgisonline.com/ArcGIS/rest/services/World_Shaded_Relief/MapServer/tile/{z}/{y}/{x}", {
+    maxNativeZoom: 13, attribution: "Relleu © Esri"
+  }).addTo(map);
+
+  // Marges perquè el panell (esquerra) i la llegenda (dreta) no tapin la zona inicial
+  function fitPad() {
+    const narrow = window.innerWidth <= 600;
+    const panel = document.querySelector(".panel").getBoundingClientRect();
+    const legend = document.getElementById("legend").getBoundingClientRect();
+    return narrow
+      ? { paddingTopLeft: [0, panel.bottom], paddingBottomRight: [legend.width + 12, 0] }
+      : { paddingTopLeft: [panel.right + 8, 0], paddingBottomRight: [legend.width + 20, 0] };
+  }
+  const vistaParam = params.get("vista");
+  const tot = [[S.south, S.west], [S.north, S.east]];
+  const v = vistaParam === "tot" ? null : vistaParam ? vistaParam.split(",").map(Number)
+          : window.innerWidth <= 600 ? VISTA_MOBIL : VISTA_INICIAL;
+  if (v && v.length === 4 && v.every(Number.isFinite)) {
+    const [vw, ve, vs, vn] = v;
+    const b = L.latLngBounds([[Math.max(vs, S.south), Math.max(vw, S.west)], [Math.min(vn, S.north), Math.min(ve, S.east)]]);
+    const ok = b.isValid() && b.getNorth() > b.getSouth() && b.getEast() > b.getWest();
+    if (ok) {
+      // Ompla l'espai lliure (fora del panell i la llegenda) amb la zona, sense marges:
+      // si la proporció no quadra es retalla una mica pels costats en lloc de mostrar mig domini més
+      const pad = fitPad(), [pl, pt] = pad.paddingTopLeft, [pr, pb] = pad.paddingBottomRight;
+      const z = map.getBoundsZoom(b, true, L.point(pl + pr, pt + pb));
+      map.setView(b.getCenter(), z, { animate: false });
+      map.panBy([-(pl - pr) / 2, -(pt - pb) / 2], { animate: false });
+    } else {
+      map.fitBounds(ok ? b : tot, fitPad());
+    }
+  } else {
+    map.fitBounds(tot, fitPad());                         // per defecte: tot el domini
+  }
+  map.setMaxBounds(L.latLngBounds([[S.south, S.west], [S.north, S.east]]).pad(0.3));
+
+  // Capa de colors en canvas: cada píxel de pantalla s'interpola bilinealment a partir de la malla
+  // (Web Mercator exacte, sense quadrats a cap zoom i amb bandes de color i costa arrodonides)
+  const FieldLayer = L.Layer.extend({
+    onAdd(m) {
+      this._c = L.DomUtil.create("canvas", "sst-canvas");
+      m.getPanes().overlayPane.appendChild(this._c);
+      m.on("moveend zoomend resize viewreset", this.redraw, this);
+      m.on("zoomstart", () => { this._c.style.visibility = "hidden"; });
+      this.redraw();
+    },
+    onRemove(m) { this._c.remove(); m.off("moveend zoomend resize viewreset", this.redraw, this); },
+    redraw() {
+      const m = this._map, size = m.getSize(), c = this._c, f = cur();
+      const dpr = Math.min(window.devicePixelRatio || 1, 2);
+      const W = Math.round(size.x * dpr), H = Math.round(size.y * dpr);
+      L.DomUtil.setPosition(c, m.containerPointToLayerPoint([0, 0]));
+      c.width = W; c.height = H;
+      c.style.width = size.x + "px"; c.style.height = size.y + "px";
+      c.style.visibility = "visible";
+      const ctx = c.getContext("2d");
+      const img = ctx.createImageData(W, H), px = new Uint32Array(img.data.buffer);
+
+      // La longitud és lineal en x; la latitud només depèn de y
+      const lngL = m.containerPointToLatLng([0, 0]).lng, lngR = m.containerPointToLatLng([size.x, 0]).lng;
+      const lngs = new Float64Array(W);
+      for (let x = 0; x < W; x++) lngs[x] = lngL + (lngR - lngL) * (x + 0.5) / W;
+
+      const V = f.values, nlat = f.nlat, nlon = f.nlon, packed = f.packed, nb1 = f.NBINS - 1;
+      const t0 = f.T_MIN, inv = 1 / f.STEP;
+      // Índexs i pesos per columna (comuns a totes les files)
+      const J0 = new Int32Array(W), WX = new Float32Array(W), OKX = new Uint8Array(W);
+      for (let x = 0; x < W; x++) {
+        const fj = (lngs[x] - f.lon0) / f.dlon;
+        OKX[x] = fj >= -0.5 && fj <= nlon - 0.5 ? 1 : 0;
+        const cj = Math.min(Math.max(fj, 0), nlon - 1), j0 = Math.min(Math.floor(cj), nlon - 2);
+        J0[x] = j0; WX[x] = cj - j0;
+      }
+      for (let y = 0; y < H; y++) {
+        const lat = m.containerPointToLatLng([0, (y + 0.5) / dpr]).lat;
+        const fi = (lat - f.lat0) / f.dlat;
+        if (fi < -0.5 || fi > nlat - 0.5) continue;
+        const ci = Math.min(Math.max(fi, 0), nlat - 1), i0 = Math.min(Math.floor(ci), nlat - 2);
+        const wy = ci - i0, row = i0 * nlon, p0 = y * W;
+        for (let x = 0; x < W; x++) {
+          if (!OKX[x]) continue;
+          const k = row + J0[x], wx = WX[x];
+          let num = 0, den = 0, v, w;
+          v = V[k];            w = (1 - wy) * (1 - wx); if (v === v) { num += w * v; den += w; }
+          v = V[k + 1];        w = (1 - wy) * wx;       if (v === v) { num += w * v; den += w; }
+          v = V[k + nlon];     w = wy * (1 - wx);       if (v === v) { num += w * v; den += w; }
+          v = V[k + nlon + 1]; w = wy * wx;             if (v === v) { num += w * v; den += w; }
+          if (den < 0.5) continue;
+          const b = Math.floor((num / den - t0) * inv + 1e-9);
+          px[p0 + x] = packed[b < 0 ? 0 : b > nb1 ? nb1 : b];
+        }
+      }
+      ctx.putImageData(img, 0, 0);
+    }
+  });
+  const fieldLayer = new FieldLayer().addTo(map);
+
+  L.rectangle([[S.south, S.west], [S.north, S.east]], { color: "#4a6075", weight: 1, fill: false, dashArray: "4 4", interactive: false }).addTo(map);
+
+  // ---------------------------------------------------------
+  // ISOTERMES (sempre de temperatura)
+  // ---------------------------------------------------------
+  // Renderitzador que dibuixa les isotermes com a corbes (quadràtiques pels punts mitjos dels segments):
+  // sense angles a cap zoom, sense haver de carregar més punts
+  const SmoothCanvas = L.Canvas.extend({
+    _updatePoly(layer, closed) {
+      if (!this._drawing) return;
+      const parts = layer._parts;
+      if (!parts.length) return;
+      const ctx = this._ctx;
+      ctx.beginPath();
+      for (const p of parts) {
+        const n = p.length;
+        if (n < 3) { ctx.moveTo(p[0].x, p[0].y); for (let i = 1; i < n; i++) ctx.lineTo(p[i].x, p[i].y); continue; }
+        const tancada = p[0].x === p[n - 1].x && p[0].y === p[n - 1].y;
+        if (tancada) {
+          ctx.moveTo((p[0].x + p[1].x) / 2, (p[0].y + p[1].y) / 2);
+          for (let i = 1; i < n; i++) {
+            const q = p[i], r = p[i + 1 < n ? i + 1 : 1];
+            ctx.quadraticCurveTo(q.x, q.y, (q.x + r.x) / 2, (q.y + r.y) / 2);
+          }
+        } else {
+          ctx.moveTo(p[0].x, p[0].y);
+          for (let i = 1; i < n - 1; i++) {
+            const q = p[i], r = p[i + 1];
+            ctx.quadraticCurveTo(q.x, q.y, (q.x + r.x) / 2, (q.y + r.y) / 2);
+          }
+          ctx.lineTo(p[n - 1].x, p[n - 1].y);
+        }
+      }
+      this._fillStroke(ctx, layer);
+    }
+  });
+  const isoRenderer = new SmoothCanvas({ padding: 0.5 });
+  const isoLines = L.layerGroup(), isoLabels = L.layerGroup();
+  const LABEL_MIN_POINTS = 40;
+  for (const iso of (sstData.isotherms || [])) {
+    const isInteger = Math.abs(iso.level - Math.round(iso.level)) < 1e-6;
+    for (const line of iso.lines) {
+      const latlngs = line.map(([x, y]) => [y, x]);
+      L.polyline(latlngs, {
+        renderer: isoRenderer, interactive: false,
+        smoothFactor: 0, lineJoin: "round", lineCap: "round",   // sense simplificar: corbes arrodonides
+        color: "#1a2a3a", opacity: isInteger ? 0.6 : 0.4, weight: isInteger ? 0.9 : 0.5
+      }).addTo(isoLines);
+      if (isInteger && line.length >= LABEL_MIN_POINTS) {
+        const mid = latlngs[Math.floor(latlngs.length / 2)];
+        L.marker(mid, {
+          interactive: false, keyboard: false,
+          icon: L.divIcon({ className: "iso-label", html: `${Math.round(iso.level)}°`, iconSize: null, iconAnchor: [8, 8] })
+        }).addTo(isoLabels);
+      }
+    }
+  }
+  const isoToggle = document.getElementById("iso-toggle");
+  const setIso = on => [isoLines, isoLabels].forEach(g => on ? g.addTo(map) : g.remove());
+  // Estat per capa: a la temperatura es mostren per defecte, a l'anomalia no (es poden activar)
+  const isoOn = { sst: true, anom: false };
+  if (!(sstData.isotherms && sstData.isotherms.length)) {
+    isoToggle.closest("label").style.display = "none";
+  } else {
+    setIso(isoToggle.checked);
+    isoToggle.addEventListener("change", () => { isoOn[mode] = isoToggle.checked; setIso(isoToggle.checked); });
+  }
+
+  // ---------------------------------------------------------
+  // LLEGENDA I CAPÇALERA (segons la capa activa)
+  // ---------------------------------------------------------
+  const legend = document.getElementById("legend");
+  const bar = document.getElementById("legend-bar");
+  const marker = document.getElementById("legend-marker");
+
+  function renderLegend() {
+    const f = cur(), M = MODES[mode];
+    const stops = f.binColors.map((c, k) => `${c} ${k / f.NBINS * 100}% ${(k + 1) / f.NBINS * 100}%`);
+    bar.style.background = `linear-gradient(to top, ${stops.join(",")})`;
+    legend.querySelectorAll(".tick").forEach(t => t.remove());
+    for (let t = f.T_MIN; t <= f.T_MAX + 1e-9; t += M.tickStep) {
+      const tick = document.createElement("div");
+      tick.className = "tick";
+      tick.style.bottom = `calc(10px + (100% - 20px) * ${(t - f.T_MIN) / (f.T_MAX - f.T_MIN)})`;
+      tick.textContent = M.tick(Math.round(t * 10) / 10);
+      legend.appendChild(tick);
+    }
+    marker.style.display = "none";
+  }
+
+  function renderHeader() {
+    const f = cur(), M = MODES[mode];
+    document.getElementById("title").textContent = M.title;
+    document.getElementById("date").textContent = f.D.date_label || f.D.date;
+    document.getElementById("ref").hidden = mode !== "anom";
+    if (f.D.source) document.getElementById("credit").textContent = `Font: ${f.D.source}  ·  @enricagud`;
+    const st = f.D.stats || {};
+    document.getElementById("s-mean").textContent = st.mean != null ? M.stat(st.mean) : "–";
+    document.getElementById("s-min").textContent  = st.min  != null ? M.stat(st.min)  : "–";
+    document.getElementById("s-max").textContent  = st.max  != null ? M.stat(st.max)  : "–";
+    document.querySelectorAll("#seg button").forEach(b => b.setAttribute("aria-pressed", String(b.dataset.mode === mode)));
+  }
+
+  // ---------------------------------------------------------
+  // CONSULTA DE VALORS
+  // ---------------------------------------------------------
+  const valueEl = document.getElementById("value"), swatch = document.getElementById("swatch");
+  const secondEl = document.getElementById("second");
+  const coordsEl = document.getElementById("coords"), tip = document.getElementById("tip");
+
+  function coordText(ll) {
+    const la = Math.abs(ll.lat), lo = Math.abs(ll.lng);
+    return `${fmt(la, 2)}° ${ll.lat >= 0 ? "N" : "S"}   ${fmt(lo, 2)}° ${ll.lng >= 0 ? "E" : "O"}`;
+  }
+
+  // Text secundari: l'altre camp en el mateix punt
+  function otherText(ll) {
+    if (mode === "sst") {
+      const a = fields.anom ? fields.anom.sample(ll) : undefined;
+      return (a === undefined || a === null) ? "" : `Anomalia ${MODES.anom.short(a)} respecte al normal`;
+    }
+    const t = fields.sst.sample(ll);
+    return (t === undefined || t === null) ? "" : `Temperatura ${MODES.sst.short(t)}`;
+  }
+
+  function show(e) {
+    const f = cur(), M = MODES[mode];
+    const t = f.sample(e.latlng);
+    coordsEl.textContent = coordText(e.latlng);
+    if (t === undefined || t === null) {
+      valueEl.className = "value empty";
+      valueEl.textContent = t === null ? "Terra o sense dada" : "Fora de la zona";
+      swatch.style.background = "transparent";
+      secondEl.textContent = "";
+      tip.style.display = "none"; marker.style.display = "none";
+      return;
+    }
+    valueEl.className = "value";
+    valueEl.innerHTML = M.value(t);
+    swatch.style.background = f.colorOf(t);
+    secondEl.textContent = otherText(e.latlng);
+    tip.textContent = M.short(t);
+    tip.style.left = e.containerPoint.x + "px";
+    tip.style.top = e.containerPoint.y + "px";
+    tip.style.display = "block";
+    const frac = Math.min(1, Math.max(0, (t - f.T_MIN) / (f.T_MAX - f.T_MIN)));
+    marker.style.bottom = `calc(10px + (100% - 20px) * ${frac})`;
+    marker.style.display = "block";
+  }
+
+  function popupHtml(ll, titol) {
+    const f = cur(), M = MODES[mode];
+    const t = f.sample(ll);
+    const ok = t !== undefined && t !== null;
+    const valor = t === undefined ? "Fora de la zona de dades" : t === null ? "Terra o sense dada" : M.short(t);
+    const altre = ok ? otherText(ll) : "";
+    return `
+      <div class="pp">
+        <span class="pp-sw" style="background:${ok ? f.colorOf(t) : "transparent"}"></span>
+        <div>
+          ${titol ? `<div class="pp-date" style="margin:0 0 2px">${titol}</div>` : ""}
+          <div class="pp-val${ok ? "" : " pp-empty"}">${valor}</div>
+          ${altre ? `<div class="pp-coord">${altre}</div>` : ""}
+          <div class="pp-coord">Lat ${fmt(ll.lat, 3)}°  ·  Lon ${fmt(ll.lng, 3)}°</div>
+          <div class="pp-coord">${coordText(ll)}</div>
+          <div class="pp-date">${f.D.date_label || f.D.date}</div>
+        </div>
+      </div>`;
+  }
+
+  // ---------------------------------------------------------
+  // VALORS EXTREMS (de la capa activa)
+  // ---------------------------------------------------------
+  const extLayer = L.layerGroup().addTo(map);
+  const extToggle = document.getElementById("ext-toggle");
+  const extScope = document.getElementById("ext-scope");
+  const scopeValue = () => extScope.querySelector("input:checked").value;
+  const medOnly = () => document.getElementById("ext-med").checked;
+
+  function extremesAll(f) {
+    let vmin = Infinity, vmax = -Infinity, kmin = -1, kmax = -1;
+    const onlyMed = medOnly();
+    for (let k = 0; k < f.values.length; k++) {
+      const v = f.values[k];
+      if (v !== v || (onlyMed && f.excl[k])) continue;
+      if (v < vmin) { vmin = v; kmin = k; }
+      if (v > vmax) { vmax = v; kmax = k; }
+    }
+    return pack(f, vmin, vmax, kmin, kmax);
+  }
+
+  // Zona realment visible: es descarten punts on el marcador quedaria tapat o tallat
+  const LAB_W = 110, LAB_H = 12, EDGE = 8;
+  function obstacles() {
+    const m = map.getContainer().getBoundingClientRect();
+    return [...document.querySelectorAll(
+      ".panel, .legend, .credit, .leaflet-control-zoom, .leaflet-control-attribution")]
+      .filter(el => el.offsetParent !== null)
+      .map(el => {
+        const r = el.getBoundingClientRect();
+        return { x0: r.left - m.left, y0: r.top - m.top, x1: r.right - m.left, y1: r.bottom - m.top };
+      });
+  }
+  function extremesInView(f) {
+    const size = map.getSize(), rects = obstacles(), onlyMed = medOnly();
+    const pA = map.latLngToContainerPoint([f.lat0, f.lon0]);
+    const pB = map.latLngToContainerPoint([f.lat0, f.lon0 + (f.nlon - 1) * f.dlon]);
+    const kx = (pB.x - pA.x) / (f.nlon - 1);
+    const jLo = Math.max(0, Math.ceil((EDGE - pA.x) / kx));
+    const jHi = Math.min(f.nlon - 1, Math.floor((size.x - LAB_W - pA.x) / kx));
+    let vmin = Infinity, vmax = -Infinity, kmin = -1, kmax = -1;
+    for (let i = 0; i < f.nlat; i++) {
+      const y = map.latLngToContainerPoint([f.lat0 + i * f.dlat, f.lon0]).y;
+      if (y < LAB_H + 2 || y > size.y - LAB_H - 2) continue;
+      const blocked = [];
+      for (const r of rects) if (y - LAB_H < r.y1 && y + LAB_H > r.y0) blocked.push([r.x0 - LAB_W, r.x1 + EDGE]);
+      const base = i * f.nlon;
+      for (let j = jLo; j <= jHi; j++) {
+        const v = f.values[base + j];
+        if (v !== v) continue;
+        if (v >= vmin && v <= vmax) continue;
+        if (onlyMed && f.excl[base + j]) continue;
+        const x = pA.x + j * kx;
+        let hidden = false;
+        for (const [b0, b1] of blocked) if (x > b0 && x < b1) { hidden = true; break; }
+        if (hidden) continue;
+        if (v < vmin) { vmin = v; kmin = base + j; }
+        if (v > vmax) { vmax = v; kmax = base + j; }
+      }
+    }
+    return pack(f, vmin, vmax, kmin, kmax);
+  }
+  function pack(f, vmin, vmax, kmin, kmax) {
+    if (kmin < 0) return null;
+    const pos = k => L.latLng(f.lat0 + Math.floor(k / f.nlon) * f.dlat, f.lon0 + (k % f.nlon) * f.dlon);
+    return { min: { t: vmin * f.scale, ll: pos(kmin) }, max: { t: vmax * f.scale, ll: pos(kmax) } };
+  }
+
+  function extMarker(p, kind) {
+    const f = cur(), M = MODES[mode];
+    return L.marker(p.ll, {
+      zIndexOffset: 1000, keyboard: false, title: M.extTitle[kind],
+      icon: L.divIcon({
+        className: "ext-icon", iconSize: [12, 12], iconAnchor: [6, 6],
+        html: `<span class="ext-ring ${kind}"></span><span class="ext-ring r2 ${kind}"></span>` +
+              `<span class="ext-dot" style="background:${f.colorOf(p.t)}"></span>` +
+              `<span class="ext-lab ${kind}">${M.extName[kind]} ${M.stat(p.t)}</span>`
+      })
+    }).bindPopup(() => popupHtml(p.ll, M.extTitle[kind]), { className: "sst-popup", offset: [0, -2] });
+  }
+
+  function updateExtremes() {
+    extLayer.clearLayers();
+    extScope.classList.toggle("off", !extToggle.checked);
+    document.getElementById("ext-med-row").classList.toggle("off", !extToggle.checked);
+    if (!extToggle.checked) return;
+    const f = cur();
+    const e = scopeValue() === "visible" ? extremesInView(f) : extremesAll(f);
+    if (!e) return;
+    extMarker(e.max, "max").addTo(extLayer);
+    extMarker(e.min, "min").addTo(extLayer);
+  }
+  extToggle.addEventListener("change", updateExtremes);
+  extScope.addEventListener("change", updateExtremes);
+  document.getElementById("ext-med").addEventListener("change", updateExtremes);
+  map.on("moveend resize", () => { if (scopeValue() === "visible") updateExtremes(); });
+
+  // ---------------------------------------------------------
+  // CANVI DE CAPA
+  // ---------------------------------------------------------
+  function setMode(m) {
+    if (!fields[m]) return;
+    mode = m;
+    map.closePopup();
+    if (sstData.isotherms && sstData.isotherms.length) { isoToggle.checked = isoOn[m]; setIso(isoOn[m]); }
+    renderHeader(); renderLegend();
+    fieldLayer.redraw();
+    updateExtremes();
+    valueEl.className = "value empty"; valueEl.textContent = "Passa el cursor pel mar";
+    swatch.style.background = "transparent"; secondEl.textContent = "";
+    const url = new URL(location);
+    if (m === "anom") url.searchParams.set("capa", "anomalia"); else url.searchParams.delete("capa");
+    history.replaceState(null, "", url);
+  }
+  document.querySelectorAll("#seg button").forEach(b =>
+    b.addEventListener("click", () => setMode(b.dataset.mode)));
+
+  renderHeader(); renderLegend(); updateExtremes();
+
+  // Anomalia: es carrega en segon pla; si no hi és, s'amaga el selector
+  const anomBtn = document.querySelector('#seg button[data-mode="anom"]');
+  new Promise(r => setTimeout(r, 400)).then(() => loadField(ANOM_URL)).then(A => {
+    fields.anom = makeField(A);
+    anomBtn.disabled = false;
+    if ((params.get("capa") || "").startsWith("anom")) setMode("anom");
+  }).catch(() => {
+    document.getElementById("seg").style.display = "none";
+  });
+
+  // ---------------------------------------------------------
+  // ESDEVENIMENTS DEL RATOLÍ
+  // ---------------------------------------------------------
+  map.on("mousemove", show);
+  map.on("click", e => {
+    show(e);
+    tip.style.display = "none";
+    L.popup({ className: "sst-popup", closeButton: true, autoPan: true, offset: [0, -4] })
+      .setLatLng(e.latlng)
+      .setContent(popupHtml(e.latlng))
+      .openOn(map);
+  });
+  map.on("mouseout", () => { tip.style.display = "none"; });
+})();
+</script>
+</body>
+</html>
