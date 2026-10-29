@@ -1,0 +1,6 @@
+# Dades generades dels visors: es pugen directament al servidor, no al repositori
+visors/**/*.json
+visors/**/*.png
+visors/**/*.geojson
+visors/radar/radar_index.js
+visors/radar/frames/

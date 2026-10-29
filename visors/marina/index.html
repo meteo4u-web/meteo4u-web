@@ -1,0 +1,1232 @@
+<!DOCTYPE html>
+<html lang="ca">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Previsió marina · onades i corrents</title>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow:wght@400;500&family=Barlow+Semi+Condensed:wght@500;600;700&display=swap">
+<style>
+  :root {
+    --ink: #102030;
+    --ink-soft: #4a6075;
+    --panel: rgba(244, 247, 250, 0.94);
+    --line: #b9c8d6;
+    --sea: #c8dce8;
+    --sans: "Barlow", "Helvetica Neue", Arial, sans-serif;
+    --cond: "Barlow Semi Condensed", "Arial Narrow", Arial, sans-serif;
+  }
+  html, body { height: 100%; margin: 0; }
+  body { background: var(--sea); color: var(--ink); font-family: var(--sans); }
+  #map { position: absolute; inset: 0; background: var(--sea); }
+  .field-canvas { opacity: 0.85; pointer-events: none; }
+  .arrow-canvas, .flow-canvas { pointer-events: none; }
+
+  .panel {
+    position: absolute; z-index: 1000; top: max(12px, env(safe-area-inset-top));
+    left: 12px; width: 228px; padding: 10px 12px 9px;
+    background: var(--panel); border-radius: 6px;
+    box-shadow: 0 1px 3px rgba(16, 32, 48, 0.25);
+  }
+  .panel h1 { font-family: var(--cond); font-weight: 600; font-size: 17px; line-height: 1.15; margin: 0; }
+  .sub { color: var(--ink-soft); font-size: 12px; margin-top: 1px; }
+
+  .layers { display: grid; grid-template-columns: 1fr 1fr; gap: 3px; margin-top: 7px; }
+  .layers button {
+    padding: 4px 4px; border: 1px solid var(--line); border-radius: 4px; background: transparent;
+    color: var(--ink-soft); font-family: var(--cond); font-weight: 500; font-size: 13px; white-space: nowrap; cursor: pointer; text-align: center;
+  }
+  .layers button[aria-pressed="true"] { background: var(--ink); color: #fff; border-color: var(--ink); }
+  .layers button:focus-visible, .play:focus-visible { outline: 2px solid var(--ink); outline-offset: 1px; }
+
+  .when { margin-top: 8px; padding-top: 7px; border-top: 1px solid var(--line); }
+  .when-label { font-family: var(--cond); font-weight: 600; font-size: 16px; }
+  .when-utc { font-size: 11px; color: var(--ink-soft); font-variant-numeric: tabular-nums; }
+  .timebar { display: flex; align-items: center; gap: 7px; margin-top: 4px; }
+  .play {
+    flex: none; width: 28px; height: 24px; border-radius: 4px; border: 1px solid var(--ink);
+    background: var(--ink); color: #fff; font-size: 12px; cursor: pointer; line-height: 1;
+  }
+  .timebar input[type=range] { flex: 1; accent-color: var(--ink); }
+
+  .readout { display: flex; align-items: center; gap: 10px; margin: 8px 0 1px; min-height: 38px; }
+  .swatch { width: 11px; align-self: stretch; border-radius: 2px; border: 1px solid var(--line); }
+  .value { font-family: var(--cond); font-weight: 700; font-size: 32px; line-height: 1; font-variant-numeric: tabular-nums; }
+  .value small { font-size: 16px; font-weight: 500; margin-left: 3px; color: var(--ink-soft); }
+  .value.empty { font-size: 13.5px; font-weight: 500; color: var(--ink-soft); font-family: var(--sans); }
+  .second, .coords { font-size: 12px; color: var(--ink-soft); font-variant-numeric: tabular-nums; min-height: 1.3em; }
+  .maxline { font-size: 12px; color: var(--ink-soft); margin-top: 5px; }
+  .maxline b { color: var(--ink); font-family: var(--cond); font-size: 14px; }
+
+  .toggle { display: flex; align-items: center; gap: 7px; margin-top: 6px; font-size: 13px; cursor: pointer; }
+  .toggle input { width: 14px; height: 14px; margin: 0; accent-color: var(--ink); }
+
+  .legend {
+    position: absolute; z-index: 1000; right: 12px; top: 50%; transform: translateY(-50%);
+    height: min(70vh, 520px); width: 70px; padding: 10px 8px;
+    background: var(--panel); border-radius: 6px; box-shadow: 0 1px 3px rgba(16, 32, 48, 0.25);
+    box-sizing: border-box;
+  }
+  .legend .unit { position: absolute; top: -20px; left: 0; right: 0; text-align: center; font-size: 12px; color: var(--ink-soft); }
+  .legend .bar { position: absolute; left: 10px; top: 10px; bottom: 10px; width: 16px; border: 1px solid var(--line); }
+  .legend .tick { position: absolute; left: 30px; font-size: 11px; color: var(--ink-soft); transform: translateY(50%); font-variant-numeric: tabular-nums; }
+  .legend .marker { position: absolute; left: 2px; width: 32px; height: 0; border-top: 2px solid var(--ink); display: none; }
+
+  .tip {
+    position: absolute; z-index: 1001; pointer-events: none; display: none;
+    padding: 3px 7px; border-radius: 3px; background: var(--ink); color: #fff;
+    font-family: var(--cond); font-weight: 600; font-size: 15px; white-space: nowrap;
+    transform: translate(12px, -130%);
+  }
+  .credit {
+    position: absolute; z-index: 1000; left: 12px; bottom: max(8px, env(safe-area-inset-bottom));
+    font-size: 11px; color: var(--ink-soft); background: var(--panel); padding: 3px 7px; border-radius: 3px;
+  }
+  /* Menú de descàrrega (botó discret a dalt a la dreta) */
+  .dl-btn {
+    width: 34px; height: 34px; display: grid; place-items: center; cursor: pointer;
+    background: #fff; border: 2px solid rgba(0,0,0,0.2); border-radius: 4px; background-clip: padding-box;
+    color: var(--ink); padding: 0;
+  }
+  .dl-btn:hover { background: #f4f4f4; }
+  .dl-btn:focus-visible { outline: 2px solid var(--ink); outline-offset: 1px; }
+  .dl-panel {
+    position: absolute; z-index: 1100; right: 12px; top: 56px; width: 270px;
+    background: var(--panel); border-radius: 6px; box-shadow: 0 2px 10px rgba(16, 32, 48, 0.3);
+    padding: 11px 13px 12px; font-size: 13px; color: var(--ink);
+  }
+  .dl-panel[hidden] { display: none; }
+  .dl-panel h2 { font-family: var(--cond); font-weight: 600; font-size: 16px; margin: 0 0 6px; }
+  .dl-close { position: absolute; top: 6px; right: 8px; border: 0; background: none; font-size: 18px; color: var(--ink-soft); cursor: pointer; }
+  .dl-row { margin-top: 8px; }
+  .dl-row > .dl-lab { display: block; font-size: 11.5px; color: var(--ink-soft); margin-bottom: 3px; }
+  .dl-seg { display: flex; border: 1px solid var(--line); border-radius: 4px; overflow: hidden; }
+  .dl-seg label { flex: 1; text-align: center; padding: 4px 0; cursor: pointer; font-family: var(--cond); font-weight: 500; font-size: 13.5px; color: var(--ink-soft); }
+  .dl-seg label + label { border-left: 1px solid var(--line); }
+  .dl-seg input { position: absolute; opacity: 0; pointer-events: none; }
+  .dl-seg label:has(input:checked) { background: var(--ink); color: #fff; }
+  .dl-seg label:has(input:focus-visible) { outline: 2px solid var(--ink); outline-offset: -2px; }
+  .dl-panel select { width: 100%; font: inherit; font-size: 13px; padding: 3px 4px; border: 1px solid var(--line); border-radius: 4px; background: #fff; color: var(--ink); }
+  .dl-two { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+  .dl-note { font-size: 11.5px; color: var(--ink-soft); margin-top: 3px; line-height: 1.35; }
+  .dl-check { display: flex; align-items: center; gap: 6px; margin-top: 8px; cursor: pointer; }
+  .dl-check input { margin: 0; accent-color: var(--ink); }
+  .dl-go { margin-top: 11px; width: 100%; padding: 7px; border: 0; border-radius: 4px; background: var(--ink); color: #fff; font-family: var(--cond); font-weight: 600; font-size: 14.5px; cursor: pointer; }
+  .dl-go:disabled { opacity: 0.6; cursor: default; }
+  .dl-prog { margin-top: 7px; font-size: 12px; color: var(--ink-soft); min-height: 1.2em; }
+  .dl-prog progress { width: 100%; height: 6px; accent-color: var(--ink); }
+  .dl-video-only[hidden] { display: none; }
+  @media (max-width: 600px) { .dl-panel { right: 8px; left: 8px; width: auto; top: 56px; } }
+
+  .loading {
+    position: absolute; z-index: 1002; left: 50%; top: 14px; transform: translateX(-50%);
+    background: var(--ink); color: #fff; padding: 5px 12px; border-radius: 4px; font-size: 14px; display: none;
+  }
+  .error { position: absolute; z-index: 1003; inset: 0; display: none; place-items: center; background: var(--sea); }
+  .error p { max-width: 460px; background: var(--panel); padding: 18px 20px; border-radius: 6px; line-height: 1.45; }
+
+  .sst-popup .leaflet-popup-content-wrapper { border-radius: 6px; background: var(--panel); color: var(--ink); }
+  .sst-popup .leaflet-popup-content { margin: 10px 26px 10px 12px; font-family: var(--sans); }
+  .pp { display: flex; gap: 10px; align-items: stretch; }
+  .pp-sw { width: 10px; border-radius: 2px; border: 1px solid var(--line); flex: none; }
+  .pp-val { font-family: var(--cond); font-weight: 700; font-size: 24px; line-height: 1.1; }
+  .pp-val.pp-empty { font-size: 15px; font-weight: 500; font-family: var(--sans); color: var(--ink-soft); }
+  .pp-stats { margin-top: 7px; padding-top: 6px; border-top: 1px solid var(--line); }
+  .pp-mm { font-size: 12.5px; color: var(--ink-soft); margin-top: 2px; display: flex; align-items: center; gap: 5px; font-variant-numeric: tabular-nums; }
+  .pp-mm b { color: var(--ink); font-family: var(--cond); font-weight: 600; font-size: 14.5px; }
+  .pp-mm-sw { width: 9px; height: 9px; border-radius: 2px; border: 1px solid var(--line); flex: none; }
+  .pp-line { font-size: 12.5px; color: var(--ink-soft); margin-top: 3px; font-variant-numeric: tabular-nums; }
+
+  @media (max-width: 600px) {
+    .panel { width: auto; right: 92px; }
+    .value { font-size: 28px; }
+    .credit { display: none; }
+  }
+</style>
+</head>
+<body>
+<div id="map"></div>
+
+<section class="panel" aria-live="polite">
+  <h1>Previsió marina</h1>
+  <div class="sub" id="sub">Carregant…</div>
+  <div class="layers" id="layers" role="group" aria-label="Capa"></div>
+
+  <div class="when">
+    <div class="when-label" id="when">–</div>
+    <div class="when-utc" id="when-utc"></div>
+    <div class="timebar">
+      <button class="play" id="play" type="button" aria-label="Reprodueix">▶</button>
+      <input type="range" id="slider" min="0" max="0" value="0" aria-label="Hora de previsió">
+    </div>
+  </div>
+
+  <div class="readout">
+    <div class="swatch" id="swatch"></div>
+    <div class="value empty" id="value">Passa el cursor pel mar</div>
+  </div>
+  <div class="second" id="second"></div>
+  <div class="coords" id="coords"></div>
+  <div class="maxline" id="maxline"></div>
+  <label class="toggle"><input type="checkbox" id="flow-toggle" checked> Animació del moviment</label>
+  <label class="toggle"><input type="checkbox" id="arrows-toggle"> Mostra fletxes de direcció</label>
+</section>
+
+<div class="legend" id="legend" aria-hidden="true">
+  <div class="unit" id="legend-unit"></div>
+  <div class="bar" id="legend-bar"></div>
+  <div class="marker" id="legend-marker"></div>
+</div>
+
+<div class="dl-panel" id="dl-panel" hidden role="dialog" aria-labelledby="dl-title">
+  <button class="dl-close" id="dl-close" type="button" aria-label="Tanca">×</button>
+  <h2 id="dl-title">Descarregar</h2>
+  <div class="dl-row">
+    <div class="dl-seg" role="radiogroup" aria-label="Format">
+      <label><input type="radio" name="dl-fmt" value="png" checked> Imatge PNG</label>
+      <label><input type="radio" name="dl-fmt" value="mp4"> Vídeo MP4</label>
+    </div>
+  </div>
+  <div class="dl-row">
+    <span class="dl-lab">Zona</span>
+    <div class="dl-note">La que veus ara al mapa. Mou-lo o fes zoom per triar-la.</div>
+  </div>
+  <div class="dl-row">
+    <label class="dl-lab" for="dl-size">Mida</label>
+    <select id="dl-size">
+      <option value="screen">Com la pantalla</option>
+      <option value="1280x720">1280 × 720 (HD)</option>
+      <option value="1920x1080" selected>1920 × 1080 (Full HD)</option>
+      <option value="1080x1080">1080 × 1080 (quadrat)</option>
+      <option value="1080x1350">1080 × 1350 (vertical)</option>
+      <option value="1080x1920">1080 × 1920 (stories)</option>
+    </select>
+  </div>
+  <div class="dl-row dl-video-only" hidden>
+    <span class="dl-lab">Hores</span>
+    <div class="dl-two">
+      <select id="dl-from" aria-label="Des de"></select>
+      <select id="dl-to" aria-label="Fins a"></select>
+    </div>
+  </div>
+  <div class="dl-row dl-video-only" hidden>
+    <label class="dl-lab" for="dl-speed">Velocitat</label>
+    <select id="dl-speed">
+      <option value="0.2">Ràpida (5 hores per segon)</option>
+      <option value="0.4" selected>Normal (2,5 hores per segon)</option>
+      <option value="0.8">Lenta (1,25 hores per segon)</option>
+    </select>
+  </div>
+  <label class="dl-check"><input type="checkbox" id="dl-arrows"> Fletxes de direcció</label>
+  <button class="dl-go" id="dl-go" type="button">Descarregar</button>
+  <div class="dl-prog" id="dl-prog" aria-live="polite"></div>
+</div>
+
+<div class="tip" id="tip"></div>
+<div class="credit" id="credit">@enricagud</div>
+<div class="loading" id="loading">Carregant capa…</div>
+<div class="error" id="error"><p id="error-msg"></p></div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+<script>
+(async function () {
+  // ---------------------------------------------------------
+  // CONFIGURACIÓ
+  // ---------------------------------------------------------
+  // URL: ?capa=hs|hs_ww|hs_sw|tp|cur   ?vista=lon_min,lon_max,lat_min,lat_max | tot
+  const params = new URLSearchParams(location.search);
+  const INDEX_URL = params.get("index") || "previsio_index.json";
+  const VISTA_INICIAL = [-1.0, 10.5, 37.0, 44.0];       // lon_min, lon_max, lat_min, lat_max
+  const VELOCITAT_MS = 600;                              // ms per fotograma en reproduir
+  const SUAVITZAT = 3;                                   // passades de suavitzat del camp pintat (0 = cap)
+  const BICUBICA = true;                                 // contorns arrodonits (false = bilineal)
+  const PIXEL = 2;                                       // resolució del dibuix: 1 = cada píxel, 2 = cada 2 px (més ràpid)
+  const ARROW_SPACING = 48;                              // px mínims entre fletxes
+  // Animació de partícules (efecte visual: la velocitat NO és la física de l'onada)
+  const FLOW = {
+    densitat: 650,      // px² de pantalla per partícula (més petit = més partícules)
+    vidaMin: 50, vidaMax: 110,   // fotogrames d'animació que viu cada partícula
+    velMin: 0.5, velMax: 2.6,    // px per fotograma d'animació (valors baixos → altos)
+    esvaiment: 0.93,    // 0-1: com més alt, més llarg el rastre
+    color: "rgba(255,255,255,0.85)", gruix: 1.3,
+  };
+  // Animació de les onades: crestes perpendiculars a la propagació que avancen
+  const ONES = {
+    densitat: 2200,     // px² per cresta (més petit = més crestes)
+    vidaMin: 70, vidaMax: 150,   // fotogrames d'animació (aparèixer → esvair-se)
+    velMin: 0.25, velMax: 1.1,   // px per fotograma (onada petita → gran)
+    llargMin: 7, llargMax: 18,   // longitud de la cresta en px (onada petita → gran)
+    corba: 0.22,        // curvatura de la cresta (0 = recta)
+    color: "#ffffff", alfa: 0.9, gruix: 1.6,
+  };
+  const TZ = "Europe/Madrid";
+
+  const fmt = (x, d = 1) => x.toLocaleString("ca-ES", { minimumFractionDigits: d, maximumFractionDigits: d });
+  const RUMBS = ["N", "NNE", "NE", "ENE", "E", "ESE", "SE", "SSE", "S", "SSO", "SO", "OSO", "O", "ONO", "NO", "NNO"];
+  const rumb = deg => RUMBS[Math.round(((deg % 360) + 360) % 360 / 22.5) % 16];
+
+  const trim = s => s.includes(",") ? s.replace(/0+$/, "").replace(/,$/, "") : s;
+  // Format per capa
+  const FORMAT = {
+    m:     { big: v => `${fmt(v, 1)}<small>m</small>`, short: v => `${fmt(v, 1)} m`, tick: t => trim(fmt(t, 2)) },
+    s:     { big: v => `${fmt(v, 1)}<small>s</small>`, short: v => `${fmt(v, 1)} s`, tick: t => String(t) },
+    "m/s": { big: v => `${fmt(v, 2)}<small>m/s</small>`, short: v => `${fmt(v, 2)} m/s (${fmt(v * 1.94384, 1)} kn)`, tick: t => trim(fmt(t, 2)) },
+  };
+  const dirText = (kind, to) => kind === "to"
+    ? `cap al ${rumb(to)} (${Math.round(to)}°)`
+    : `ve del ${rumb(to + 180)} (${Math.round((to + 180) % 360)}°)`;
+
+  function fail(msg) {
+    document.getElementById("error-msg").textContent = msg;
+    document.getElementById("error").style.display = "grid";
+  }
+  async function loadJson(url) {
+    const r = await fetch(url, { cache: "no-cache" });
+    if (!r.ok) throw new Error(`HTTP ${r.status}`);
+    return r.json();
+  }
+
+  let INDEX;
+  try { INDEX = await loadJson(INDEX_URL); }
+  catch (e) {
+    return fail(`No s'ha pogut carregar ${INDEX_URL} (${e.message}). Comprova que els fitxers són al mateix ` +
+                `directori i que obres la pàgina des d'un servidor web, no amb file://.`);
+  }
+
+  // ---------------------------------------------------------
+  // CAPES: es carreguen sota demanda i es guarden en memòria
+  // ---------------------------------------------------------
+  const cache = {};
+  function prepLayer(D) {
+    const L_ = { D, ...D };
+    const pal = D.palette;
+    L_.thr = pal.map(p => p[0]);
+    L_.NB = pal.length - 1;
+    L_.colors = pal.slice(0, L_.NB).map(p => p[1]);
+    L_.rgb = L_.colors.map(h => [1, 3, 5].map(k => parseInt(h.slice(k, k + 2), 16)));
+    L_.binOf = v => {                     // llindars no uniformes: cerca binària
+      let lo = 0, hi = L_.NB - 1;
+      if (v < L_.thr[0]) return 0;
+      while (lo < hi) { const m = (lo + hi + 1) >> 1; if (L_.thr[m] <= v) lo = m; else hi = m - 1; }
+      return lo;
+    };
+    L_.colorOf = v => L_.colors[L_.binOf(v)];
+    L_.south = D.lat0 - D.dlat / 2; L_.north = D.lat0 + (D.nlat - 0.5) * D.dlat;
+    L_.west  = D.lon0 - D.dlon / 2; L_.east  = D.lon0 + (D.nlon - 0.5) * D.dlon;
+    L_.times = D.times.map(t => new Date(t.replace("Z", ":00Z")));
+    L_.data = new Map();                  // fotogrames descodificats (memòria limitada)
+    L_.pending = new Map();               // descàrregues en curs
+    L_.last = null;                       // últim fotograma disponible (per no deixar el mapa buit)
+    return L_;
+  }
+
+  // ---------------------------------------------------------
+  // FOTOGRAMES: un PNG per hora amb les dades codificades
+  //   R,G = valor en 16 bits (× scale) · B = direcció (× 360/256) · A = 255 mar / 0 terra
+  // ---------------------------------------------------------
+  const MAX_FRAMES = 48;
+  const dec = document.createElement("canvas");
+  async function decodePng(url, Ly) {
+    const r = await fetch(url);
+    if (!r.ok) throw new Error(`HTTP ${r.status} (${url})`);
+    // Sense conversió de color ni alfa premultiplicat: els bytes arriben intactes
+    const bmp = await createImageBitmap(await r.blob(), { premultiplyAlpha: "none", colorSpaceConversion: "none" });
+    dec.width = bmp.width; dec.height = bmp.height;
+    const ctx = dec.getContext("2d", { willReadFrequently: true });
+    ctx.clearRect(0, 0, bmp.width, bmp.height);
+    ctx.drawImage(bmp, 0, 0);
+    const px = ctx.getImageData(0, 0, bmp.width, bmp.height).data;
+    const n = Ly.nlat, m = Ly.nlon;
+    const vals = new Float32Array(n * m), dirs = new Int16Array(n * m);
+    for (let i = 0; i < n; i++) {
+      const row = n - 1 - i;                               // fila 0 del PNG = nord
+      for (let j = 0; j < m; j++) {
+        const p = (row * m + j) * 4, k = i * m + j;
+        if (px[p + 3] < 128) { vals[k] = NaN; dirs[k] = -1; continue; }
+        vals[k] = (px[p] * 256 + px[p + 1]) * Ly.scale;
+        dirs[k] = Math.round(px[p + 2] * 360 / 256);
+      }
+    }
+    return { vals, dirs, smooth: smoothField(vals, n, m, SUAVITZAT) };
+  }
+
+  // Suavitzat binomial 3x3 que ignora terra (no arrossega valors cap a la costa)
+  function smoothField(src, n, m, passes) {
+    if (!passes) return src;
+    let a = src, b = new Float32Array(n * m);
+    const W = [1, 2, 1];
+    for (let pass = 0; pass < passes; pass++) {
+      for (let i = 0; i < n; i++) {
+        for (let j = 0; j < m; j++) {
+          const k = i * m + j;
+          if (a[k] !== a[k]) { b[k] = NaN; continue; }
+          let acc = 0, ws = 0;
+          for (let di = -1; di <= 1; di++) {
+            const ii = i + di;
+            if (ii < 0 || ii >= n) continue;
+            for (let dj = -1; dj <= 1; dj++) {
+              const jj = j + dj;
+              if (jj < 0 || jj >= m) continue;
+              const v = a[ii * m + jj];
+              if (v !== v) continue;
+              const w = W[di + 1] * W[dj + 1];
+              acc += w * v; ws += w;
+            }
+          }
+          b[k] = acc / ws;
+        }
+      }
+      const t = a === src ? new Float32Array(n * m) : a;
+      a = b; b = t;
+    }
+    return a;
+  }
+  // Màxim i mínim de cada punt durant tota la previsió (es carreguen al primer clic)
+  //   R,G = valor (× scale) · B = hora des de l'inici · A = mar/terra
+  async function decodeStats(url, Ly) {
+    const r = await fetch(url);
+    if (!r.ok) throw new Error(`HTTP ${r.status} (${url})`);
+    const bmp = await createImageBitmap(await r.blob(), { premultiplyAlpha: "none", colorSpaceConversion: "none" });
+    dec.width = bmp.width; dec.height = bmp.height;
+    const ctx = dec.getContext("2d", { willReadFrequently: true });
+    ctx.clearRect(0, 0, bmp.width, bmp.height);
+    ctx.drawImage(bmp, 0, 0);
+    const px = ctx.getImageData(0, 0, bmp.width, bmp.height).data;
+    const n = Ly.nlat, m = Ly.nlon, vals = new Float32Array(n * m), hrs = new Uint8Array(n * m);
+    for (let i = 0; i < n; i++) {
+      let p = (n - 1 - i) * m * 4, k = i * m;
+      for (let j = 0; j < m; j++, p += 4, k++) {
+        vals[k] = px[p + 3] < 128 ? NaN : (px[p] * 256 + px[p + 1]) * Ly.scale;
+        hrs[k] = px[p + 2];
+      }
+    }
+    return { vals, hrs };
+  }
+  function loadStats(Ly) {
+    if (!Ly.stats) return Promise.resolve(null);
+    if (!Ly.statsP) {
+      const v = `?v=${Ly.generated}`;
+      Ly.statsP = Promise.all([decodeStats(Ly.stats.max + v, Ly), decodeStats(Ly.stats.min + v, Ly)])
+        .then(([max, min]) => ({ max, min, t0: new Date(Ly.stats.t0.replace("Z", ":00Z")) }))
+        .catch(e => { console.error(e); Ly.statsP = null; return null; });
+    }
+    return Ly.statsP;
+  }
+
+  function loadFrame(Ly, k) {
+    if (Ly.data.has(k)) return Promise.resolve(Ly.data.get(k));
+    if (Ly.pending.has(k)) return Ly.pending.get(k);
+    const pr = decodePng(`${Ly.frames[k]}?v=${Ly.generated}`, Ly).then(d => {
+      Ly.data.set(k, d); Ly.pending.delete(k);
+      if (Ly.data.size > MAX_FRAMES) Ly.data.delete(Ly.data.keys().next().value);
+      return d;
+    }, e => { Ly.pending.delete(k); throw e; });
+    Ly.pending.set(k, pr);
+    return pr;
+  }
+  // Dades del fotograma actual (o l'últim que s'ha pogut mostrar, mentre arriba)
+  function frameData() {
+    const d = layer.data.get(frame);
+    if (d) { layer.last = d; return d; }
+    return layer.last;
+  }
+  // Mostra el fotograma k quan estigui descarregat, i precarrega els següents
+  function ensureFrame(k) {
+    const Ly = layer;
+    loadFrame(Ly, k).then(() => {
+      if (Ly === layer && k === frame) { fieldLayer.redraw(); arrowLayer.redraw(); if (lastLL) show(lastLL, lastPt); }
+    }).catch(e => console.error(e));
+    for (let a = 1; a <= 3; a++) loadFrame(Ly, (k + a) % Ly.times.length).catch(() => {});
+  }
+  // Valor interpolat (bilineal) en un índex fraccionari de la malla, ignorant terra.
+  // Retorna NaN si el punt és majoritàriament terra (pes vàlid < 0.5): així la costa queda suau.
+  function interp(Ly, vals, fi, fj) {
+    const n = Ly.nlat, m = Ly.nlon;
+    let i0 = Math.floor(fi), j0 = Math.floor(fj);
+    const t = fi - i0, u = fj - j0;
+    let i1 = i0 + 1, j1 = j0 + 1;
+    if (i0 < 0) i0 = 0; if (i1 > n - 1) i1 = n - 1; if (i0 > n - 1) i0 = n - 1; if (i1 < 0) i1 = 0;
+    if (j0 < 0) j0 = 0; if (j1 > m - 1) j1 = m - 1; if (j0 > m - 1) j0 = m - 1; if (j1 < 0) j1 = 0;
+    let acc = 0, ws = 0, v, w;
+    v = vals[i0 * m + j0]; w = (1 - t) * (1 - u); if (v === v && w > 0) { acc += w * v; ws += w; }
+    v = vals[i0 * m + j1]; w = (1 - t) * u;       if (v === v && w > 0) { acc += w * v; ws += w; }
+    v = vals[i1 * m + j0]; w = t * (1 - u);       if (v === v && w > 0) { acc += w * v; ws += w; }
+    v = vals[i1 * m + j1]; w = t * u;             if (v === v && w > 0) { acc += w * v; ws += w; }
+    return ws >= 0.5 ? acc / ws : NaN;
+  }
+
+  // Catmull-Rom: passa pels valors de la malla i fa corbes de nivell arrodonides
+  function cr(p0, p1, p2, p3, t) {
+    const t2 = t * t, t3 = t2 * t;
+    return 0.5 * ((2 * p1) + (-p0 + p2) * t + (2 * p0 - 5 * p1 + 4 * p2 - p3) * t2 + (-p0 + 3 * p1 - 3 * p2 + p3) * t3);
+  }
+  function interpCubic(Ly, vals, fi, fj) {
+    const n = Ly.nlat, m = Ly.nlon;
+    const i1 = Math.floor(fi), j1 = Math.floor(fj);
+    if (i1 < 1 || j1 < 1 || i1 > n - 3 || j1 > m - 3) return interp(Ly, vals, fi, fj);
+    const t = fi - i1, u = fj - j1;
+    const r = [0, 0, 0, 0];
+    for (let a = 0; a < 4; a++) {
+      const base = (i1 - 1 + a) * m + j1 - 1;
+      const v0 = vals[base], v1 = vals[base + 1], v2 = vals[base + 2], v3 = vals[base + 3];
+      if (v0 !== v0 || v1 !== v1 || v2 !== v2 || v3 !== v3) return interp(Ly, vals, fi, fj);
+      r[a] = cr(v0, v1, v2, v3, u);
+    }
+    return cr(r[0], r[1], r[2], r[3], t);
+  }
+
+  async function getLayer(id) {
+    if (cache[id]) return cache[id];
+    const meta = INDEX.layers.find(l => l.id === id);
+    document.getElementById("loading").style.display = "block";
+    try { return (cache[id] = prepLayer(await loadJson(meta.file))); }
+    finally { document.getElementById("loading").style.display = "none"; }
+  }
+
+  // ---------------------------------------------------------
+  // ESTAT
+  // ---------------------------------------------------------
+  const startId = INDEX.layers.some(l => l.id === params.get("capa")) ? params.get("capa") : INDEX.layers[0].id;
+  let layer, frame = 0;
+  try { layer = await getLayer(startId); }
+  catch (e) { return fail(`No s'ha pogut carregar la capa ${startId} (${e.message}).`); }
+  // Comença a l'hora més propera a ara
+  const now = Date.now();
+  frame = layer.times.reduce((best, t, k) => Math.abs(t - now) < Math.abs(layer.times[best] - now) ? k : best, 0);
+  try { await loadFrame(layer, frame); }
+  catch (e) { return fail(`No s'ha pogut carregar el fotograma (${e.message}).`); }
+
+  document.getElementById("sub").textContent = `Passada del ${INDEX.run.split("-").reverse().join("/")}`;
+
+  // ---------------------------------------------------------
+  // MAPA
+  // ---------------------------------------------------------
+  const map = L.map("map", { zoomControl: false, minZoom: 4, maxZoom: 11, zoomSnap: 0.25, zoomDelta: 0.5 });
+  L.control.zoom({ position: "bottomright" }).addTo(map);
+  L.tileLayer("https://server.arcgisonline.com/ArcGIS/rest/services/World_Shaded_Relief/MapServer/tile/{z}/{y}/{x}", {
+    maxNativeZoom: 13, attribution: "Relleu © Esri"
+  }).addTo(map);
+
+  function fitPad() {
+    const narrow = window.innerWidth <= 600;
+    const panel = document.querySelector(".panel").getBoundingClientRect();
+    const legend = document.getElementById("legend").getBoundingClientRect();
+    return narrow
+      ? { paddingTopLeft: [0, panel.bottom], paddingBottomRight: [legend.width + 12, 0] }
+      : { paddingTopLeft: [panel.right + 8, 0], paddingBottomRight: [legend.width + 20, 0] };
+  }
+  const full = [[layer.south, layer.west], [layer.north, layer.east]];
+  const vp = params.get("vista");
+  if (vp === "tot") map.fitBounds(full, fitPad());
+  else {
+    const v = vp ? vp.split(",").map(Number) : VISTA_INICIAL;
+    const [w, e, s, n] = (v.length === 4 && v.every(Number.isFinite)) ? v : VISTA_INICIAL;
+    map.fitBounds([[s, w], [n, e]], fitPad());
+  }
+  map.setMaxBounds(L.latLngBounds(full).pad(0.3));
+
+  // Capa de colors (reprojecció fila a fila a Mercator) + fletxes, en dos canvas
+  const CanvasLayer = L.Layer.extend({
+    initialize(cls, draw) { this._cls = cls; this._draw = draw; },
+    onAdd(m) {
+      this._c = L.DomUtil.create("canvas", this._cls);
+      m.getPanes().overlayPane.appendChild(this._c);
+      m.on("moveend zoomend resize viewreset", this.redraw, this);
+      m.on("zoomstart", () => { this._c.style.visibility = "hidden"; });
+      this.redraw();
+    },
+    onRemove(m) { this._c.remove(); m.off("moveend zoomend resize viewreset", this.redraw, this); },
+    redraw() {
+      if (!this._map) return;
+      const m = this._map, size = m.getSize(), c = this._c;
+      L.DomUtil.setPosition(c, m.containerPointToLayerPoint([0, 0]));
+      c.width = size.x; c.height = size.y; c.style.visibility = "visible";
+      this._draw(m, c.getContext("2d"), size);
+    }
+  });
+
+  // El camp es calcula per a cada píxel de pantalla (interpolació bilineal): suau a qualsevol zoom
+  const off = document.createElement("canvas");
+  function drawField(m, ctx, size) {
+    const fd = frameData();
+    if (!fd) return;
+    const Ly = layer, vals = fd.smooth || fd.vals, R = PIXEL;
+    const f = BICUBICA ? interpCubic : interp;
+    const W = Math.ceil(size.x / R), H = Math.ceil(size.y / R);
+    off.width = W; off.height = H;
+    const octx = off.getContext("2d"), img = octx.createImageData(W, H), data = img.data;
+    // Longitud lineal en x (Mercator): índex fraccionari de columna per a cada x
+    const lonL = m.containerPointToLatLng([0, 0]).lng, lonR = m.containerPointToLatLng([size.x, 0]).lng;
+    const fjs = new Float64Array(W);
+    for (let x = 0; x < W; x++) fjs[x] = (lonL + (x * R + R / 2) / size.x * (lonR - lonL) - Ly.lon0) / Ly.dlon;
+    for (let y = 0; y < H; y++) {
+      const fi = (m.containerPointToLatLng([0, y * R + R / 2]).lat - Ly.lat0) / Ly.dlat;
+      if (fi < -0.5 || fi > Ly.nlat - 0.5) continue;
+      for (let x = 0; x < W; x++) {
+        const fj = fjs[x];
+        if (fj < -0.5 || fj > Ly.nlon - 0.5) continue;
+        const v = f(Ly, vals, fi, fj);
+        if (v !== v) continue;
+        const col = Ly.rgb[Ly.binOf(v)], p = (y * W + x) * 4;
+        data[p] = col[0]; data[p + 1] = col[1]; data[p + 2] = col[2]; data[p + 3] = 255;
+      }
+    }
+    octx.putImageData(img, 0, 0);
+    ctx.imageSmoothingEnabled = R > 1;
+    ctx.drawImage(off, 0, 0, W * R, H * R);
+  }
+
+  // Fletxes de direcció. Amb 'phase' (segons) es mouen: avancen en la seva direcció,
+  // apareixen i s'esvaeixen, més de pressa on el valor és més alt.
+  const ARROW_MOVE = { amplitud: 16, cicle: 2.4 };      // px de recorregut · segons per cicle
+  function drawArrows(m, ctx, size, phase = null, force = false, sc = 1) {
+    if (!force && !document.getElementById("arrows-toggle").checked) return;
+    const fd = frameData();
+    if (!fd) return;
+    const A = layer, dirs = fd.dirs, vals = fd.vals;
+    const vmax = Math.max(A.max[frame] || 1, 1e-6);
+    // Aclarir segons el zoom: com a mínim ARROW_SPACING píxels entre fletxes
+    const p0 = m.latLngToContainerPoint([A.lat0, A.lon0]);
+    const p1 = m.latLngToContainerPoint([A.lat0 + A.dlat, A.lon0 + A.dlon]);
+    const step = Math.max(1, Math.ceil(ARROW_SPACING * sc / Math.max(1, Math.min(Math.abs(p1.x - p0.x), Math.abs(p1.y - p0.y)))));
+    const len = 12 * sc;
+    ctx.lineCap = "round"; ctx.lineJoin = "round";
+    for (let i = 0; i < A.nlat; i += step) {
+      const y0 = m.latLngToContainerPoint([A.lat0 + i * A.dlat, A.lon0]).y;
+      if (y0 < -30 || y0 > size.y + 30) continue;
+      for (let j = 0; j < A.nlon; j += step) {
+        const k = i * A.nlon + j, d = dirs[k];
+        if (d < 0) continue;
+        const x0 = m.latLngToContainerPoint([A.lat0 + i * A.dlat, A.lon0 + j * A.dlon]).x;
+        if (x0 < -30 || x0 > size.x + 30) continue;
+        const r = d * Math.PI / 180, dx = Math.sin(r), dy = -Math.cos(r);   // brúixola → pantalla
+        let x = x0, y = y0, alpha = 1;
+        if (phase !== null) {
+          const v = vals[k], kv = v === v ? Math.min(1, v / vmax) : 0;
+          const seed = ((i * 73856093) ^ (j * 19349663)) >>> 0;
+          const sp = (0.45 + 0.85 * kv) / ARROW_MOVE.cicle;
+          const t = (phase * sp + (seed % 1000) / 1000) % 1;   // 0 → 1
+          const off = (t - 0.5) * ARROW_MOVE.amplitud * sc;
+          x += dx * off; y += dy * off;
+          alpha = Math.sin(Math.PI * t);
+        }
+        const xa = x - dx * len / 2, ya = y - dy * len / 2, xb = x + dx * len / 2, yb = y + dy * len / 2;
+        const hx = -dy, hy = dx;                                               // perpendicular
+        ctx.globalAlpha = alpha;
+        for (const [w, col] of [[3, "rgba(255,255,255,0.55)"], [1.3, "rgba(16,32,48,0.7)"]]) {
+          ctx.strokeStyle = col; ctx.lineWidth = w * sc;
+          ctx.beginPath();
+          ctx.moveTo(xa, ya); ctx.lineTo(xb, yb);
+          ctx.moveTo(xb - (dx * 5 - hx * 3.5) * sc, yb - (dy * 5 - hy * 3.5) * sc); ctx.lineTo(xb, yb);
+          ctx.lineTo(xb - (dx * 5 + hx * 3.5) * sc, yb - (dy * 5 + hy * 3.5) * sc);
+          ctx.stroke();
+        }
+      }
+    }
+    ctx.globalAlpha = 1;
+  }
+
+  const fieldLayer = new CanvasLayer("field-canvas", drawField).addTo(map);
+  const arrowsMoving = () => document.getElementById("arrows-toggle").checked &&
+    document.getElementById("flow-toggle").checked && !window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+  const arrowLayer = new CanvasLayer("arrow-canvas",
+    (m, ctx, size) => drawArrows(m, ctx, size, arrowsMoving() ? performance.now() / 1000 : null)).addTo(map);
+
+  // Bucle de moviment de les fletxes (~30 fps); s'atura mentre es mou el mapa
+  let arrowRaf = null, mapMoving = false, lastArrow = 0;
+  function arrowLoop(ts) {
+    arrowRaf = null;
+    if (!arrowsMoving()) { arrowLayer.redraw(); return; }
+    if (!mapMoving && ts - lastArrow > 33 && arrowLayer._c) {
+      lastArrow = ts;
+      const c = arrowLayer._c, ctx = c.getContext("2d");
+      ctx.clearRect(0, 0, c.width, c.height);
+      drawArrows(map, ctx, map.getSize(), ts / 1000);
+    }
+    arrowRaf = requestAnimationFrame(arrowLoop);
+  }
+  function syncArrows() {
+    arrowLayer.redraw();
+    if (arrowsMoving() && !arrowRaf) arrowRaf = requestAnimationFrame(arrowLoop);
+  }
+  map.on("movestart zoomstart", () => { mapMoving = true; });
+  map.on("moveend zoomend", () => { mapMoving = false; });
+  document.getElementById("arrows-toggle").addEventListener("change", syncArrows);
+  document.getElementById("flow-toggle").addEventListener("change", syncArrows);
+
+  // ---------------------------------------------------------
+  // ANIMACIÓ DEL MOVIMENT (partícules amb rastre)
+  // ---------------------------------------------------------
+  const flowToggle = document.getElementById("flow-toggle");
+  if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) flowToggle.checked = false;
+
+  const FlowLayer = L.Layer.extend({
+    onAdd(m) {
+      this._c = L.DomUtil.create("canvas", "flow-canvas");
+      m.getPanes().overlayPane.appendChild(this._c);
+      this._ctx = this._c.getContext("2d");
+      this._p = [];
+      m.on("movestart zoomstart", this.stop, this);
+      m.on("moveend resize", this.reset, this);
+      this.reset();
+    },
+    onRemove(m) {
+      this.stop(); this._c.remove();
+      m.off("movestart zoomstart", this.stop, this); m.off("moveend resize", this.reset, this);
+    },
+    stop() {
+      if (this._raf) cancelAnimationFrame(this._raf);
+      this._raf = null;
+      if (this._c) this._c.style.visibility = "hidden";
+    },
+    // Recalcula la geometria de pantalla i torna a sembrar partícules
+    reset() {
+      this.stop();
+      if (!flowToggle.checked) { this._ctx.clearRect(0, 0, this._c.width, this._c.height); return; }
+      const m = this._map, size = m.getSize(), c = this._c;
+      L.DomUtil.setPosition(c, m.containerPointToLayerPoint([0, 0]));
+      c.width = size.x; c.height = size.y; c.style.visibility = "visible";
+      this._w = size.x; this._h = size.y;
+      // Mercator: longitud lineal en x; latitud precalculada per a cada fila de píxels
+      this._lonL = m.containerPointToLatLng([0, 0]).lng;
+      this._kx = (m.containerPointToLatLng([size.x, 0]).lng - this._lonL) / size.x;
+      this._lat = new Float64Array(size.y);
+      for (let y = 0; y < size.y; y++) this._lat[y] = m.containerPointToLatLng([0, y]).lat;
+      // Corrent → partícules amb rastre; onades → crestes
+      this._mode = layer.layer === "cur" ? "flux" : "ones";
+      this._cfg = this._mode === "ones" ? ONES : FLOW;
+      this._ctx.clearRect(0, 0, size.x, size.y);
+      const n = Math.round(size.x * size.y / this._cfg.densitat);
+      this._p = Array.from({ length: n }, () => this.spawn({}, true));
+      this._raf = requestAnimationFrame(() => this.step());
+    },
+    // Índexs de malla d'un punt de pantalla
+    cell(x, y) {
+      const yi = y | 0;
+      if (yi < 0 || yi >= this._h) return null;
+      return {
+        fi: (this._lat[yi] - layer.lat0) / layer.dlat,
+        fj: (this._lonL + x * this._kx - layer.lon0) / layer.dlon,
+      };
+    },
+    spawn(p, randomAge) {
+      const fd = frameData();
+      for (let t = 0; t < 12; t++) {               // busca un punt de mar
+        p.x = Math.random() * this._w; p.y = Math.random() * this._h;
+        const c = this.cell(p.x, p.y);
+        if (fd && c && interp(layer, fd.vals, c.fi, c.fj) === interp(layer, fd.vals, c.fi, c.fj)) break;
+      }
+      const cfg = this._cfg;
+      p.life = cfg.vidaMin + Math.random() * (cfg.vidaMax - cfg.vidaMin);
+      p.age = randomAge ? Math.random() * p.life : 0;
+      return p;
+    },
+    step() {
+      const fd = frameData(), ctx = this._ctx, Ly = layer;
+      if (!fd) { this._raf = requestAnimationFrame(() => this.step()); return; }
+      if (this._mode === "ones") { this.stepOnes(fd); this._raf = requestAnimationFrame(() => this.step()); return; }
+      // Esvair el rastre anterior
+      ctx.globalCompositeOperation = "destination-in";
+      ctx.fillStyle = `rgba(0,0,0,${FLOW.esvaiment})`;
+      ctx.fillRect(0, 0, this._w, this._h);
+      ctx.globalCompositeOperation = "source-over";
+      ctx.strokeStyle = FLOW.color; ctx.lineWidth = FLOW.gruix; ctx.lineCap = "round";
+      // Escala de velocitat: valor del punt respecte al màxim del fotograma
+      const vmax = Math.max(Ly.max[frame] || 1, 1e-6);
+      ctx.beginPath();
+      for (const p of this._p) {
+        const c = this.cell(p.x, p.y);
+        const v = c ? interp(Ly, fd.vals, c.fi, c.fj) : NaN;
+        const i = c ? Math.round(c.fi) : -1, j = c ? Math.round(c.fj) : -1;
+        const d = (i >= 0 && i < Ly.nlat && j >= 0 && j < Ly.nlon) ? fd.dirs[i * Ly.nlon + j] : -1;
+        if (v !== v || d < 0 || ++p.age > p.life) { this.spawn(p, false); continue; }
+        const r = d * Math.PI / 180;
+        const sp = FLOW.velMin + (FLOW.velMax - FLOW.velMin) * Math.min(1, v / vmax);
+        const nx = p.x + Math.sin(r) * sp, ny = p.y - Math.cos(r) * sp;
+        if (nx < 0 || nx >= this._w || ny < 0 || ny >= this._h) { this.spawn(p, false); continue; }
+        ctx.moveTo(p.x, p.y); ctx.lineTo(nx, ny);
+        p.x = nx; p.y = ny;
+      }
+      ctx.stroke();
+      this._raf = requestAnimationFrame(() => this.step());
+    },
+    // Crestes d'onada: segment corbat perpendicular a la propagació, que avança i s'esvaeix
+    stepOnes(fd) {
+      const ctx = this._ctx, Ly = layer, C = ONES;
+      ctx.clearRect(0, 0, this._w, this._h);
+      ctx.strokeStyle = C.color; ctx.lineWidth = C.gruix; ctx.lineCap = "round";
+      const vmax = Math.max(Ly.max[frame] || 1, 1e-6);
+      for (const p of this._p) {
+        const c = this.cell(p.x, p.y);
+        const v = c ? interp(Ly, fd.vals, c.fi, c.fj) : NaN;
+        const i = c ? Math.round(c.fi) : -1, j = c ? Math.round(c.fj) : -1;
+        const d = (i >= 0 && i < Ly.nlat && j >= 0 && j < Ly.nlon) ? fd.dirs[i * Ly.nlon + j] : -1;
+        if (v !== v || d < 0 || ++p.age > p.life) { this.spawn(p, false); continue; }
+        const k = Math.min(1, v / vmax);
+        const r = d * Math.PI / 180;
+        const ux = Math.sin(r), uy = -Math.cos(r);        // cap on avança (pantalla)
+        const px = -uy, py = ux;                          // al llarg de la cresta
+        const sp = C.velMin + (C.velMax - C.velMin) * k;
+        p.x += ux * sp; p.y += uy * sp;
+        if (p.x < 0 || p.x >= this._w || p.y < 0 || p.y >= this._h) { this.spawn(p, false); continue; }
+        const half = (C.llargMin + (C.llargMax - C.llargMin) * k) / 2;
+        const bulge = half * 2 * C.corba;
+        ctx.globalAlpha = C.alfa * Math.sin(Math.PI * p.age / p.life);   // apareix i s'esvaeix
+        ctx.beginPath();
+        ctx.moveTo(p.x - px * half - ux * bulge, p.y - py * half - uy * bulge);
+        ctx.quadraticCurveTo(p.x + ux * bulge, p.y + uy * bulge,
+                             p.x + px * half - ux * bulge, p.y + py * half - uy * bulge);
+        ctx.stroke();
+      }
+      ctx.globalAlpha = 1;
+    },
+  });
+  const flowLayer = new FlowLayer().addTo(map);
+  flowToggle.addEventListener("change", () => flowLayer.reset());
+
+  // ---------------------------------------------------------
+  // PANELL: capes, temps, llegenda
+  // ---------------------------------------------------------
+  const layersEl = document.getElementById("layers");
+  for (const l of INDEX.layers) {
+    const b = document.createElement("button");
+    b.type = "button"; b.dataset.id = l.id; b.textContent = l.label;
+    b.addEventListener("click", () => setLayer(l.id));
+    layersEl.appendChild(b);
+  }
+  const slider = document.getElementById("slider");
+  const whenEl = document.getElementById("when"), whenUtc = document.getElementById("when-utc");
+  const fmtLocal = new Intl.DateTimeFormat("ca-ES", { timeZone: TZ, weekday: "long", day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" });
+  const fmtUtc = d => `${d.toISOString().slice(0, 16).replace("T", " ")} UTC`;
+
+  function renderTime() {
+    const t = layer.times[frame];
+    whenEl.textContent = fmtLocal.format(t).replace(/^./, c => c.toUpperCase()) + " h";
+    const lead = Math.round((t - layer.times[0]) / 3.6e6);
+    whenUtc.textContent = `${fmtUtc(t)}  ·  +${lead} h`;
+    slider.value = frame;
+    const mx = layer.max[frame];
+    document.getElementById("maxline").innerHTML = mx == null ? "" :
+      `Màxim a tota la zona: <b>${FORMAT[layer.units].short(mx)}</b>`;
+  }
+
+  // Etiquetes "rodones" de la llegenda: en metres, enters a partir d'1 m i mitjos per sota
+  function showTick(Ly, t, k) {
+    const n = Ly.NB;
+    return k === 0 || k === n ||
+      (Ly.units === "m" ? (t >= 1 ? Number.isInteger(t) : (t * 2) % 1 === 0) : n <= 13 || k % 2 === 0);
+  }
+  function renderLegend() {
+    const lg = document.getElementById("legend"), bar = document.getElementById("legend-bar");
+    const n = layer.NB;
+    bar.style.background = `linear-gradient(to top, ${layer.colors.map((c, k) => `${c} ${k / n * 100}% ${(k + 1) / n * 100}%`).join(",")})`;
+    lg.querySelectorAll(".tick").forEach(t => t.remove());
+    layer.thr.forEach((t, k) => {
+      if (!showTick(layer, t, k)) return;
+      const el = document.createElement("div");
+      el.className = "tick";
+      el.style.bottom = `calc(10px + (100% - 20px) * ${k / n})`;
+      el.textContent = FORMAT[layer.units].tick(t);
+      lg.appendChild(el);
+    });
+    document.getElementById("legend-unit").textContent = layer.units;
+    document.getElementById("legend-marker").style.display = "none";
+  }
+
+  function renderAll() {
+    if (typeof DL !== "undefined" && !DL.panel.hidden && !DL.busy) fillHours();
+    document.querySelectorAll("#layers button").forEach(b => b.setAttribute("aria-pressed", String(b.dataset.id === layer.layer)));
+    slider.max = layer.times.length - 1;
+    document.getElementById("credit").textContent = `Font: ${layer.source}  ·  @enricagud`;
+    renderLegend(); renderTime();
+    fieldLayer.redraw(); arrowLayer.redraw();
+    if (lastLL) show(lastLL, lastPt);
+    ensureFrame(frame);
+    if (typeof flowLayer !== "undefined") flowLayer.reset();
+  }
+
+  async function setLayer(id) {
+    if (layer && id === layer.layer) return;
+    const t = layer.times[frame];
+    let next;
+    try { next = await getLayer(id); } catch (e) { return alert(`No s'ha pogut carregar la capa (${e.message})`); }
+    // mateixa hora (o la més propera) a la capa nova
+    const k = next.times.reduce((b, tt, i) => Math.abs(tt - t) < Math.abs(next.times[b] - t) ? i : b, 0);
+    document.getElementById("loading").style.display = "block";
+    try { await loadFrame(next, k); }
+    catch (e) { return alert(`No s'ha pogut carregar la capa (${e.message})`); }
+    finally { document.getElementById("loading").style.display = "none"; }
+    layer = next; frame = k;
+    map.closePopup();
+    const url = new URL(location); url.searchParams.set("capa", id); history.replaceState(null, "", url);
+    renderAll();
+  }
+
+  function setFrame(k) {
+    frame = (k + layer.times.length) % layer.times.length;
+    renderTime();
+    if (layer.data.has(frame)) { fieldLayer.redraw(); arrowLayer.redraw(); if (lastLL) show(lastLL, lastPt); }
+    ensureFrame(frame);
+  }
+  slider.addEventListener("input", () => setFrame(+slider.value));
+
+  // Reproducció
+  const playBtn = document.getElementById("play");
+  let timer = null;
+  function setPlaying(on) {
+    if (on && !timer) timer = setInterval(() => setFrame(frame + 1), VELOCITAT_MS);
+    if (!on && timer) { clearInterval(timer); timer = null; }
+    playBtn.textContent = timer ? "❚❚" : "▶";
+    playBtn.setAttribute("aria-label", timer ? "Atura" : "Reprodueix");
+  }
+  playBtn.addEventListener("click", () => setPlaying(!timer));
+  document.addEventListener("keydown", e => {
+    // Al panell de descàrrega les tecles són dels seus controls; l'espai en un botó el prem (no fa play)
+    if (e.target.closest && e.target.closest(".dl-panel")) return;
+    if (e.key === " " && e.target.tagName === "BUTTON") return;
+    if (e.target.tagName === "SELECT") return;
+    if (e.target.tagName === "INPUT" && e.target.type !== "range") return;
+    const enSlider = e.target.type === "range";            // el control lliscant ja es mou sol amb les fletxes
+    if (e.key === "ArrowRight" && !enSlider) { setPlaying(false); setFrame(frame + 1); }
+    if (e.key === "ArrowLeft" && !enSlider)  { setPlaying(false); setFrame(frame - 1); }
+    if (e.key === " ") { e.preventDefault(); setPlaying(!timer); }
+  });
+
+  // ---------------------------------------------------------
+  // CONSULTA DE VALORS
+  // ---------------------------------------------------------
+  const valueEl = document.getElementById("value"), swatch = document.getElementById("swatch");
+  const secondEl = document.getElementById("second"), coordsEl = document.getElementById("coords");
+  const tip = document.getElementById("tip"), marker = document.getElementById("legend-marker");
+  let lastLL = null, lastPt = null;
+
+  function sample(ll) {
+    const i = Math.round((ll.lat - layer.lat0) / layer.dlat), j = Math.round((ll.lng - layer.lon0) / layer.dlon);
+    if (i < 0 || i >= layer.nlat || j < 0 || j >= layer.nlon) return { v: undefined };
+    const fd = frameData();
+    if (!fd) return { v: undefined };
+    const vi = interp(layer, fd.vals, (ll.lat - layer.lat0) / layer.dlat, (ll.lng - layer.lon0) / layer.dlon);
+    if (vi !== vi) return { v: null };
+    const d = fd.dirs[i * layer.nlon + j];
+    return { v: vi, d: d >= 0 ? d : null };
+  }
+  const coordText = ll => `${fmt(Math.abs(ll.lat), 2)}° ${ll.lat >= 0 ? "N" : "S"}   ${fmt(Math.abs(ll.lng), 2)}° ${ll.lng >= 0 ? "E" : "O"}`;
+
+  function show(ll, pt) {
+    lastLL = ll; lastPt = pt;
+    const s = sample(ll), F = FORMAT[layer.units];
+    coordsEl.textContent = coordText(ll);
+    if (s.v === undefined || s.v === null) {
+      valueEl.className = "value empty";
+      valueEl.textContent = s.v === null ? "Terra o sense dada" : "Fora de la zona";
+      swatch.style.background = "transparent"; secondEl.textContent = "";
+      tip.style.display = "none"; marker.style.display = "none";
+      return;
+    }
+    valueEl.className = "value"; valueEl.innerHTML = F.big(s.v);
+    swatch.style.background = layer.colorOf(s.v);
+    secondEl.textContent = [layer.units === "m/s" ? `${fmt(s.v * 1.94384, 1)} nusos` : "",
+                            s.d != null ? dirText(layer.dir_kind, s.d) : ""].filter(Boolean).join("  ·  ");
+    if (pt) {
+      tip.textContent = F.short(s.v).replace(/ \(.*\)$/, "");
+      tip.style.left = pt.x + "px"; tip.style.top = pt.y + "px"; tip.style.display = "block";
+    }
+    marker.style.bottom = `calc(10px + (100% - 20px) * ${(layer.binOf(s.v) + 0.5) / layer.NB})`;
+    marker.style.display = "block";
+  }
+
+  map.on("mousemove", e => show(e.latlng, e.containerPoint));
+  map.on("mouseout", () => { tip.style.display = "none"; lastPt = null; });
+  // Línies de màxim i mínim de tota la previsió en el punt més proper de la malla
+  const fmtShort = new Intl.DateTimeFormat("ca-ES", { timeZone: TZ, weekday: "short", day: "numeric", hour: "2-digit", minute: "2-digit" });
+  function statsHtml(Ly, st, ll) {
+    if (!st) return "";
+    const i = Math.round((ll.lat - Ly.lat0) / Ly.dlat), j = Math.round((ll.lng - Ly.lon0) / Ly.dlon);
+    if (i < 0 || i >= Ly.nlat || j < 0 || j >= Ly.nlon) return "";
+    const k = i * Ly.nlon + j, F = FORMAT[Ly.units];
+    const vM = st.max.vals[k], vm = st.min.vals[k];
+    if (vM !== vM) return "";
+    const when = h => fmtShort.format(new Date(st.t0.getTime() + h * 3.6e6)) + " h";
+    return `<div class="pp-stats">
+        <div class="pp-line" style="margin:0 0 2px">En aquest punt, durant tota la previsió</div>
+        <div class="pp-mm"><span class="pp-mm-sw" style="background:${Ly.colorOf(vM)}"></span>Màx <b>${F.short(vM).replace(/ \(.*\)$/, "")}</b> · ${when(st.max.hrs[k])}</div>
+        <div class="pp-mm"><span class="pp-mm-sw" style="background:${Ly.colorOf(vm)}"></span>Mín <b>${F.short(vm).replace(/ \(.*\)$/, "")}</b> · ${when(st.min.hrs[k])}</div>
+      </div>`;
+  }
+
+  map.on("click", e => {
+    show(e.latlng, null); tip.style.display = "none";
+    const s = sample(e.latlng), F = FORMAT[layer.units], ok = s.v != null, Ly = layer;
+    const popup = L.popup({ className: "sst-popup", autoPan: true, offset: [0, -4] });
+    const html = statsPart => `
+      <div class="pp">
+        <span class="pp-sw" style="background:${ok ? layer.colorOf(s.v) : "transparent"}"></span>
+        <div>
+          <div class="pp-line" style="margin:0 0 2px">${layer.label}</div>
+          <div class="pp-val${ok ? "" : " pp-empty"}">${ok ? F.short(s.v) : (s.v === null ? "Terra o sense dada" : "Fora de la zona")}</div>
+          ${ok && s.d != null ? `<div class="pp-line">${dirText(layer.dir_kind, s.d)}</div>` : ""}
+          <div class="pp-line">${coordText(e.latlng)}</div>
+          <div class="pp-line">${whenEl.textContent}</div>
+          ${statsPart}
+        </div>
+      </div>`;
+    const loading = ok && Ly.stats ? `<div class="pp-stats pp-line">Calculant màxim i mínim…</div>` : "";
+    popup.setLatLng(e.latlng).setContent(html(loading)).openOn(map);
+    if (ok) loadStats(Ly).then(st => { if (popup.isOpen()) popup.setContent(html(statsHtml(Ly, st, e.latlng))); });
+  });
+
+  // ---------------------------------------------------------
+  // DESCÀRREGA: imatge PNG o vídeo MP4 de la zona visible
+  // ---------------------------------------------------------
+  const DL = {
+    panel: document.getElementById("dl-panel"), go: document.getElementById("dl-go"),
+    prog: document.getElementById("dl-prog"), from: document.getElementById("dl-from"),
+    to: document.getElementById("dl-to"), size: document.getElementById("dl-size"),
+    speed: document.getElementById("dl-speed"), arrows: document.getElementById("dl-arrows"),
+    busy: false, cancel: false,
+  };
+  const DlControl = L.Control.extend({
+    options: { position: "topright" },
+    onAdd() {
+      const b = L.DomUtil.create("button", "dl-btn leaflet-control");
+      b.type = "button"; b.title = "Descarregar imatge o vídeo"; b.setAttribute("aria-label", "Descarregar imatge o vídeo");
+      b.innerHTML = '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 4v11M7 10l5 5 5-5M5 20h14"/></svg>';
+      L.DomEvent.disableClickPropagation(b);
+      L.DomEvent.on(b, "click", () => toggleDl(DL.panel.hidden));
+      return b;
+    },
+  });
+  new DlControl().addTo(map);
+  L.DomEvent.disableClickPropagation(DL.panel);
+  L.DomEvent.disableScrollPropagation(DL.panel);
+
+  const fmtOpt = new Intl.DateTimeFormat("ca-ES", { timeZone: TZ, weekday: "short", day: "numeric", hour: "2-digit", minute: "2-digit" });
+  function fillHours() {
+    const opts = layer.times.map((t, k) => `<option value="${k}">${fmtOpt.format(t)} h</option>`).join("");
+    DL.from.innerHTML = opts; DL.to.innerHTML = opts;
+    DL.from.value = frame;
+    DL.to.value = Math.min(layer.times.length - 1, frame + 47);
+  }
+  function toggleDl(open) {
+    if (DL.busy && !open) return;
+    DL.panel.hidden = !open;
+    if (open) { fillHours(); DL.arrows.checked = document.getElementById("arrows-toggle").checked; updateDlForm(); }
+  }
+  function updateDlForm() {
+    const video = DL.panel.querySelector("input[name=dl-fmt]:checked").value === "mp4";
+    DL.panel.querySelectorAll(".dl-video-only").forEach(el => { el.hidden = !video; });
+    if (!DL.busy) DL.prog.textContent = "";
+  }
+  DL.panel.addEventListener("change", e => { if (e.target.name === "dl-fmt") updateDlForm(); });
+  document.getElementById("dl-close").addEventListener("click", () => {
+    if (DL.busy) { DL.cancel = true; return; }
+    toggleDl(false);
+  });
+  document.addEventListener("keydown", e => { if (e.key === "Escape" && !DL.panel.hidden && !DL.busy) toggleDl(false); });
+
+  function exportSize() {
+    if (DL.size.value === "screen") {
+      const s = map.getSize(), r = Math.min(2, window.devicePixelRatio || 1);
+      return [Math.round(s.x * r / 2) * 2, Math.round(s.y * r / 2) * 2];
+    }
+    return DL.size.value.split("x").map(Number);
+  }
+
+  // Mapa ocult de la mida de sortida, encaixat a la zona visible
+  async function makeExportMap(W, H) {
+    const div = document.createElement("div");
+    div.style.cssText = `position:fixed;left:-${W + 100}px;top:0;width:${W}px;height:${H}px;`;
+    document.body.appendChild(div);
+    const m = L.map(div, { zoomControl: false, attributionControl: false, zoomSnap: 0, fadeAnimation: false, zoomAnimation: false });
+    m.fitBounds(map.getBounds(), { animate: false });
+    const tiles = L.tileLayer("https://server.arcgisonline.com/ArcGIS/rest/services/World_Shaded_Relief/MapServer/tile/{z}/{y}/{x}",
+      { maxNativeZoom: 13, crossOrigin: "anonymous" });
+    await new Promise(res => { tiles.once("load", res); setTimeout(res, 15000); tiles.addTo(m); });
+    // Base: fons de relleu (si el servidor no permet copiar-lo, es fa servir un color de terra)
+    const base = document.createElement("canvas");
+    base.width = W; base.height = H;
+    let bctx = base.getContext("2d");
+    const paintFallback = () => { bctx.fillStyle = "#ddd8cc"; bctx.fillRect(0, 0, W, H); };
+    paintFallback();
+    const box = div.getBoundingClientRect();
+    div.querySelectorAll("img.leaflet-tile-loaded").forEach(img => {
+      const r = img.getBoundingClientRect();
+      try { bctx.drawImage(img, r.left - box.left, r.top - box.top, r.width, r.height); } catch (e) {}
+    });
+    try { bctx.getImageData(0, 0, 1, 1); }
+    catch (e) { base.width = W; bctx = base.getContext("2d"); paintFallback(); }   // fons "contaminat": sense relleu
+    return { m, div, base };
+  }
+
+  // Textos i llegenda damunt de la imatge
+  function drawOverlay(ctx, W, H, k) {
+    const sc = Math.max(1, Math.min(W, H) / 720), F = FORMAT[layer.units];
+    const font = (w, px, fam = "Barlow Semi Condensed") => `${w} ${Math.round(px * sc)}px "${fam}", Arial, sans-serif`;
+    const pad = 14 * sc, panel = "rgba(244,247,250,0.92)", ink = "#102030", soft = "#4a6075";
+    const rr = (x, y, w, h, r) => { ctx.beginPath(); ctx.roundRect(x, y, w, h, r); ctx.fill(); };
+    // Títol i data
+    const t1 = `Previsió marina · ${layer.label}`;
+    const t2 = fmtLocal.format(layer.times[k]).replace(/^./, c => c.toUpperCase()) + " h";
+    ctx.font = font(600, 22); const w1 = ctx.measureText(t1).width;
+    ctx.font = font(500, 17); const w2 = ctx.measureText(t2).width;
+    ctx.fillStyle = panel; rr(pad, pad, Math.max(w1, w2) + 2 * pad, 64 * sc, 6 * sc);
+    ctx.fillStyle = ink; ctx.textBaseline = "alphabetic";
+    ctx.font = font(600, 22); ctx.fillText(t1, 2 * pad, pad + 28 * sc);
+    ctx.fillStyle = soft; ctx.font = font(500, 17); ctx.fillText(t2, 2 * pad, pad + 52 * sc);
+    // Llegenda vertical
+    const lh = Math.min(H - 2 * pad - 60 * sc, 420 * sc), lw = 16 * sc, bx = W - pad - 56 * sc, by = (H - lh) / 2;
+    ctx.fillStyle = panel; rr(bx - 8 * sc, by - 26 * sc, 64 * sc, lh + 40 * sc, 6 * sc);
+    const n = layer.NB;
+    layer.colors.forEach((c, i) => { ctx.fillStyle = c; ctx.fillRect(bx, by + lh - (i + 1) * lh / n, lw, lh / n + 0.5); });
+    ctx.strokeStyle = "#b9c8d6"; ctx.lineWidth = 1; ctx.strokeRect(bx, by, lw, lh);
+    ctx.fillStyle = soft; ctx.font = font(500, 12, "Barlow"); ctx.textBaseline = "middle";
+    ctx.fillText(layer.units, bx, by - 14 * sc);
+    layer.thr.forEach((t, i) => { if (showTick(layer, t, i)) ctx.fillText(F.tick(t), bx + lw + 5 * sc, by + lh - i * lh / n); });
+    // Crèdits
+    const cr = `${layer.source} · Relleu © Esri · meteo4u.com · @enricagud`;
+    ctx.font = font(400, 12, "Barlow"); const cw = ctx.measureText(cr).width;
+    ctx.fillStyle = panel; rr(pad, H - pad - 20 * sc, cw + 14 * sc, 20 * sc, 3 * sc);
+    ctx.fillStyle = soft; ctx.textBaseline = "middle"; ctx.fillText(cr, pad + 7 * sc, H - pad - 10 * sc);
+  }
+
+  // Camp de colors d'una hora a la mida de sortida
+  function renderField(ex, W, H) {
+    const c = document.createElement("canvas");
+    c.width = W; c.height = H;
+    drawField(ex.m, c.getContext("2d"), { x: W, y: H });
+    return c;
+  }
+  function composeFrame(ctx, ex, fieldC, W, H, k, phase) {
+    ctx.drawImage(ex.base, 0, 0);
+    ctx.globalAlpha = 0.85; ctx.drawImage(fieldC, 0, 0); ctx.globalAlpha = 1;
+    if (DL.arrows.checked) drawArrows(ex.m, ctx, { x: W, y: H }, phase, true, Math.max(1, Math.min(W, H) / 720));
+    drawOverlay(ctx, W, H, k);
+  }
+
+  function saveBlob(blob, name) {
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob); a.download = name;
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(a.href), 4000);
+  }
+  const stamp = t => t.toISOString().slice(0, 13).replace(/[-T]/g, "");
+  function loadScript(src) {
+    return new Promise((res, rej) => {
+      const s = document.createElement("script"); s.src = src; s.onload = res; s.onerror = () => rej(new Error("no s'ha pogut carregar " + src));
+      document.head.appendChild(s);
+    });
+  }
+  async function pickCodec(W, H, bitrate) {
+    for (const codec of ["avc1.640034", "avc1.640028", "avc1.4d0028", "avc1.42002a", "avc1.42001f"]) {
+      try {
+        const r = await VideoEncoder.isConfigSupported({ codec, width: W, height: H, bitrate, framerate: 30 });
+        if (r.supported) return codec;
+      } catch (e) {}
+    }
+    return null;
+  }
+
+  async function runExport() {
+    const video = DL.panel.querySelector("input[name=dl-fmt]:checked").value === "mp4";
+    const [W, H] = exportSize();
+    const savedFrame = frame, wasPlaying = !!timer;
+    setPlaying(false);
+    DL.busy = true; DL.cancel = false; DL.go.disabled = true;
+    document.getElementById("dl-close").setAttribute("aria-label", "Cancel·la");
+    const say = (txt, frac) => { DL.prog.innerHTML = frac == null ? txt : `${txt}<br><progress max="1" value="${frac}"></progress>`; };
+    let ex = null;
+    try {
+      await document.fonts.ready;
+      say("Preparant el mapa…");
+      ex = await makeExportMap(W, H);
+      const out = document.createElement("canvas");
+      out.width = W; out.height = H;
+      const ctx = out.getContext("2d");
+
+      if (!video) {
+        frame = savedFrame;
+        composeFrame(ctx, ex, renderField(ex, W, H), W, H, frame, null);
+        const blob = await new Promise(r => out.toBlob(r, "image/png"));
+        saveBlob(blob, `previsio_${layer.layer}_${stamp(layer.times[frame])}.png`);
+        say("Imatge descarregada.");
+        return;
+      }
+
+      let k0 = +DL.from.value, k1 = +DL.to.value;
+      if (k1 < k0) [k0, k1] = [k1, k0];
+      const FPS = 30, perHour = Math.max(1, Math.round(+DL.speed.value * FPS));
+      const total = (k1 - k0 + 1) * perHour;
+      const name = `previsio_${layer.layer}_${stamp(layer.times[k0])}-${stamp(layer.times[k1])}`;
+
+      const bitrate = Math.round(W * H * FPS * 0.12);
+      const codec = "VideoEncoder" in window ? await pickCodec(W, H, bitrate) : null;
+      if (codec) {
+        // MP4 (H.264) amb WebCodecs: cada fotograma exacte, independent de la velocitat de l'ordinador
+        say("Carregant el codificador…");
+        if (!window.Mp4Muxer) await loadScript("https://cdn.jsdelivr.net/npm/mp4-muxer@5.1.3/build/mp4-muxer.js");
+        const target = new Mp4Muxer.ArrayBufferTarget();
+        const muxer = new Mp4Muxer.Muxer({ target, video: { codec: "avc", width: W, height: H }, fastStart: "in-memory" });
+        let encErr = null;
+        const enc = new VideoEncoder({ output: (chunk, meta) => muxer.addVideoChunk(chunk, meta), error: e => { encErr = e; } });
+        enc.configure({ codec, width: W, height: H, bitrate, framerate: FPS });
+        let n = 0;
+        for (let k = k0; k <= k1; k++) {
+          if (DL.cancel) throw new Error("cancel·lat");
+          await loadFrame(layer, k); frame = k;
+          const fieldC = renderField(ex, W, H);
+          for (let f = 0; f < perHour; f++, n++) {
+            composeFrame(ctx, ex, fieldC, W, H, k, DL.arrows.checked ? n / FPS : null);
+            const vf = new VideoFrame(out, { timestamp: Math.round(n * 1e6 / FPS), duration: Math.round(1e6 / FPS) });
+            enc.encode(vf, { keyFrame: n % (FPS * 2) === 0 });
+            vf.close();
+            while (enc.encodeQueueSize > 8) await new Promise(r => setTimeout(r, 4));
+            if (encErr) throw encErr;
+          }
+          say(`Generant vídeo… ${Math.round(100 * n / total)} %`, n / total);
+        }
+        await enc.flush(); enc.close(); muxer.finalize();
+        saveBlob(new Blob([target.buffer], { type: "video/mp4" }), name + ".mp4");
+        say(`Vídeo descarregat (${(target.buffer.byteLength / 1e6).toFixed(1)} MB).`);
+      } else {
+        // Navegadors sense codificador H.264: gravació en temps real (WebM)
+        const stream = out.captureStream(FPS);
+        const rec = new MediaRecorder(stream, { mimeType: MediaRecorder.isTypeSupported("video/webm;codecs=vp9") ? "video/webm;codecs=vp9" : "video/webm", videoBitsPerSecond: 8e6 });
+        const chunks = []; rec.ondataavailable = e => e.data.size && chunks.push(e.data);
+        const done = new Promise(r => { rec.onstop = r; });
+        rec.start();
+        let n = 0;
+        for (let k = k0; k <= k1; k++) {
+          if (DL.cancel) { rec.stop(); throw new Error("cancel·lat"); }
+          await loadFrame(layer, k); frame = k;
+          const fieldC = renderField(ex, W, H);
+          for (let f = 0; f < perHour; f++, n++) {
+            composeFrame(ctx, ex, fieldC, W, H, k, DL.arrows.checked ? n / FPS : null);
+            await new Promise(r => setTimeout(r, 1000 / FPS));
+          }
+          say(`Gravant vídeo… ${Math.round(100 * n / total)} %`, n / total);
+        }
+        rec.stop(); await done;
+        saveBlob(new Blob(chunks, { type: "video/webm" }), name + ".webm");
+        say("Vídeo descarregat (format WebM: aquest navegador no fa MP4).");
+      }
+    } catch (e) {
+      console.error(e);
+      say(e.message === "cancel·lat" ? "Cancel·lat." : `No s'ha pogut generar: ${e.message}`);
+    } finally {
+      if (ex) { ex.m.remove(); ex.div.remove(); }
+      frame = savedFrame;
+      DL.busy = false; DL.go.disabled = false;
+      document.getElementById("dl-close").setAttribute("aria-label", "Tanca");
+      renderTime(); fieldLayer.redraw(); arrowLayer.redraw(); ensureFrame(frame);
+      if (wasPlaying) setPlaying(true);
+    }
+  }
+  DL.go.addEventListener("click", () => { if (!DL.busy) runExport(); });
+
+  renderAll();
+  syncArrows();
+})();
+</script>
+</body>
+</html>
