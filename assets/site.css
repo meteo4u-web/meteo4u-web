@@ -1,0 +1,101 @@
+/* Estils comuns de la portada i les pàgines de text (els visors porten els seus) */
+:root {
+  --ink: #102030;
+  --ink-soft: #4a6075;
+  --panel: #f4f7fa;
+  --line: #b9c8d6;
+  --sea: #c8dce8;
+  --deep: #0d2236;
+  --sans: "Barlow", "Helvetica Neue", Arial, sans-serif;
+  --cond: "Barlow Semi Condensed", "Arial Narrow", Arial, sans-serif;
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; }
+body { background: var(--panel); color: var(--ink); font-family: var(--sans); line-height: 1.5; }
+a { color: inherit; }
+:focus-visible { outline: 2px solid var(--ink); outline-offset: 2px; }
+.wrap { max-width: 1040px; margin: 0 auto; padding: 0 16px; }
+
+/* Capçalera */
+.top { background: var(--deep); color: #fff; }
+.top .wrap { display: flex; align-items: center; justify-content: space-between; gap: 16px; height: 56px; }
+.brand { font-family: var(--cond); font-weight: 700; font-size: 24px; text-decoration: none; letter-spacing: 0.01em; }
+.brand span { color: #7fc4e8; }
+.top nav { display: flex; gap: 4px; }
+.top nav a {
+  font-family: var(--cond); font-weight: 600; font-size: 15px; text-decoration: none;
+  padding: 6px 10px; border-radius: 4px; color: #d6e4ef;
+}
+.top nav a:hover, .top nav a[aria-current="page"] { background: rgba(255, 255, 255, 0.12); color: #fff; }
+.top :focus-visible { outline-color: #fff; }
+
+/* Capçalera gran de la portada */
+.hero {
+  background: linear-gradient(180deg, var(--deep) 0%, #1d4566 70%, #2f6688 100%);
+  color: #fff; padding: 40px 0 56px;
+}
+.hero h1 { font-family: var(--cond); font-weight: 700; font-size: clamp(30px, 6vw, 46px); line-height: 1.1; margin: 0; }
+.hero p { color: #d6e4ef; font-size: 18px; max-width: 34em; margin: 10px 0 0; }
+
+/* Targetes dels visors */
+.viewers { margin-top: -32px; padding-bottom: 48px; }
+.grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 16px; }
+.card {
+  display: flex; flex-direction: column; background: #fff; border-radius: 8px; overflow: hidden;
+  box-shadow: 0 1px 3px rgba(16, 32, 48, 0.2); color: inherit; text-decoration: none;
+}
+a.card { transition: box-shadow 0.15s, transform 0.15s; }
+a.card:hover { box-shadow: 0 6px 18px rgba(16, 32, 48, 0.22); transform: translateY(-2px); }
+.card .swatch { height: 96px; position: relative; }
+.card .body { padding: 14px 16px 16px; flex: 1; display: flex; flex-direction: column; }
+.card h2 { font-family: var(--cond); font-weight: 600; font-size: 22px; line-height: 1.2; margin: 0; }
+.card p { font-size: 15px; color: var(--ink-soft); margin: 6px 0 0; flex: 1; }
+.card .go { font-family: var(--cond); font-weight: 600; font-size: 15px; margin-top: 12px; }
+.card.soon { background: transparent; box-shadow: none; border: 1px dashed var(--line); }
+.card.soon .swatch { opacity: 0.45; }
+.card.soon .go { color: var(--ink-soft); }
+.tag {
+  position: absolute; top: 10px; left: 10px; font-family: var(--cond); font-weight: 600; font-size: 12px;
+  text-transform: uppercase; letter-spacing: 0.05em; background: rgba(255, 255, 255, 0.9);
+  color: var(--ink); padding: 2px 7px; border-radius: 3px;
+}
+/* Franges de color inspirades en les paletes de cada visor */
+.sw-arome { background: linear-gradient(90deg, #5e3c99 0%, #3b7cc4 18%, #5fbfd9 32%, #a6dba0 46%, #f7e47a 60%, #f4a259 74%, #d7301f 88%, #7f0000 100%); }
+.sw-sst   { background: linear-gradient(90deg, #08306b 0%, #2171b5 25%, #6baed6 45%, #fdd49e 65%, #f16913 82%, #a50f15 100%); }
+.sw-radar { background: linear-gradient(90deg, #e8f4fb 0%, #9ad0ec 18%, #3d9be0 34%, #2fb24a 50%, #f5e44a 64%, #f39a2b 78%, #e0301e 90%, #b0177f 100%); }
+.sw-icon  { background: linear-gradient(90deg, #f7fbff 0%, #c6dbef 25%, #6baed6 50%, #2171b5 75%, #08306b 100%); }
+.sw-mar   { background: linear-gradient(90deg, #e0f3f8 0%, #91bfdb 30%, #4575b4 60%, #313695 100%); }
+.swatch::after {
+  content: ""; position: absolute; inset: 0;
+  background: repeating-linear-gradient(170deg, transparent 0 22px, rgba(255, 255, 255, 0.18) 22px 23px);
+}
+
+/* Blocs de text */
+.section { padding: 8px 0 48px; }
+.section h2 { font-family: var(--cond); font-weight: 700; font-size: 26px; margin: 0 0 8px; }
+.section p { max-width: 40em; color: var(--ink-soft); margin: 0 0 10px; }
+
+/* Pàgina de contacte */
+.page-head { background: var(--deep); color: #fff; padding: 32px 0 36px; }
+.page-head h1 { font-family: var(--cond); font-weight: 700; font-size: 36px; margin: 0; }
+.page-head p { color: #d6e4ef; margin: 6px 0 0; }
+.about { display: grid; grid-template-columns: 160px 1fr; gap: 24px; align-items: start; padding: 32px 0 48px; }
+.avatar {
+  width: 160px; height: 160px; border-radius: 50%; background: linear-gradient(135deg, #1d4566, #5fbfd9);
+  color: #fff; display: grid; place-items: center; font-family: var(--cond); font-weight: 700; font-size: 52px;
+  object-fit: cover;
+}
+.about h2 { font-family: var(--cond); font-weight: 700; font-size: 26px; margin: 0 0 6px; }
+.about p { margin: 0 0 12px; max-width: 38em; }
+.contact-list { list-style: none; padding: 0; margin: 16px 0 0; display: grid; gap: 8px; }
+.contact-list li { display: flex; gap: 10px; align-items: baseline; }
+.contact-list .k { font-family: var(--cond); font-weight: 600; color: var(--ink-soft); min-width: 7em; }
+@media (max-width: 560px) {
+  .about { grid-template-columns: 1fr; }
+  .avatar { width: 120px; height: 120px; font-size: 40px; }
+  .contact-list li { flex-direction: column; gap: 0; }
+}
+
+/* Peu */
+footer { border-top: 1px solid var(--line); padding: 20px 0 28px; font-size: 14px; color: var(--ink-soft); }
+footer .wrap { display: flex; flex-wrap: wrap; gap: 8px 24px; justify-content: space-between; }
